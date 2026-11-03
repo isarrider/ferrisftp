@@ -14,10 +14,11 @@ use std::path::{Path, PathBuf};
 
 use crate::attrs::FileAttrs;
 use crate::handles::Handle;
+use crate::log::Quoted;
 use crate::protocol::*;
 use crate::server::{
-    OpResult, Server, Status, cstring, last_os_error, ok, path_from, realpath, single_name,
-    status_text,
+    OpResult, Server, Status, cstring, last_os_error, log_setstat, ok, path_from, realpath,
+    single_name, status_text,
 };
 use crate::sys;
 use crate::wire::{DecodeError, DecodeResult, Reader, Writer};
@@ -59,6 +60,7 @@ impl Server {
             b"posix-rename@openssh.com" => {
                 let from = r.string()?;
                 let to = r.string()?;
+                crate::log_info!("posix-rename old {} new {}", Quoted(from), Quoted(to));
                 fs::rename(path_from(from), path_from(to))
                     .map_err(Status::from)
                     .and_then(|()| ok(id))
@@ -66,6 +68,7 @@ impl Server {
             b"hardlink@openssh.com" => {
                 let existing = r.string()?;
                 let link = r.string()?;
+                crate::log_info!("hardlink old {} new {}", Quoted(existing), Quoted(link));
                 fs::hard_link(path_from(existing), path_from(link))
                     .map_err(Status::from)
                     .and_then(|()| ok(id))
@@ -77,14 +80,14 @@ impl Server {
             b"fstatvfs@openssh.com" => {
                 let handle = r.string()?;
                 match self.handles.get_mut(handle) {
-                    Some(Handle::File { file }) => fstatvfs(id, file),
+                    Some(Handle::File { file, .. }) => fstatvfs(id, file),
                     _ => Err(Status::bad_handle()),
                 }
             }
             b"fsync@openssh.com" => {
                 let handle = r.string()?;
                 match self.handles.get_mut(handle) {
-                    Some(Handle::File { file }) => {
+                    Some(Handle::File { file, .. }) => {
                         file.sync_all().map_err(Status::from).and_then(|()| ok(id))
                     }
                     _ => Err(Status::bad_handle()),
@@ -93,6 +96,7 @@ impl Server {
             b"lsetstat@openssh.com" => {
                 let path = r.string()?;
                 let attrs = FileAttrs::decode(r)?;
+                log_setstat(path, &attrs);
                 lsetstat(path_from(path), &attrs).and_then(|()| ok(id))
             }
             b"limits@openssh.com" => {
@@ -194,13 +198,23 @@ impl Server {
             }
         }
 
-        let src = match self.handles.get_mut(read_handle) {
-            Some(Handle::File { file }) => file.try_clone()?,
+        let (src, src_path) = match self.handles.get_mut(read_handle) {
+            Some(Handle::File { file, path, .. }) => (file.try_clone()?, path.clone()),
             _ => return Err(Status::bad_handle()),
         };
-        let Some(Handle::File { file: dst }) = self.handles.get_mut(write_handle) else {
+        let Some(Handle::File {
+            file: dst,
+            path: dst_path,
+            ..
+        }) = self.handles.get_mut(write_handle)
+        else {
             return Err(Status::bad_handle());
         };
+        crate::log_info!(
+            "copy-data from {} offset {read_offset} length {read_len} to {} offset {write_offset}",
+            Quoted(src_path.as_os_str().as_bytes()),
+            Quoted(dst_path.as_os_str().as_bytes())
+        );
 
         let mut buf = vec![0u8; COPY_CHUNK];
         let (mut src_pos, mut dst_pos) = (read_offset, write_offset);
