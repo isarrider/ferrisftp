@@ -25,7 +25,6 @@ Implemented:
 - OpenSSH extensions: `posix-rename`, `statvfs`, `fstatvfs`, `hardlink`,
   `fsync`, `lsetstat`, `limits`, `expand-path`, `copy-data`,
   `home-directory`, `users-groups-by-id`
-
 - Command-line options compatible with OpenSSH's sftp-server: read-only
   mode, start directory, umask, request allow/deny lists
 
