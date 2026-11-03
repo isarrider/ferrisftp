@@ -1,0 +1,569 @@
+//! Drives the server with real SFTP packets against a scratch directory.
+
+use std::fs;
+use std::io::Cursor;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use ferrisftp::Server;
+use ferrisftp::attrs::FileAttrs;
+use ferrisftp::protocol::*;
+use ferrisftp::wire::{Reader, Writer};
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let p = std::env::temp_dir().join(format!(
+            "ferrisftp-test-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    }
+
+    fn path(&self, name: &str) -> PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// One decoded reply: packet type and body (request id included).
+struct Reply {
+    kind: u8,
+    body: Vec<u8>,
+}
+
+impl Reply {
+    fn reader(&self) -> Reader<'_> {
+        let mut r = Reader::new(&self.body);
+        r.u32().unwrap(); // request id
+        r
+    }
+
+    fn status(&self) -> u32 {
+        assert_eq!(self.kind, SSH_FXP_STATUS, "expected STATUS");
+        self.reader().u32().unwrap()
+    }
+
+    fn handle(&self) -> Vec<u8> {
+        assert_eq!(
+            self.kind,
+            SSH_FXP_HANDLE,
+            "expected HANDLE, got status {:?}",
+            self.try_status()
+        );
+        self.reader().string().unwrap().to_vec()
+    }
+
+    fn data(&self) -> Vec<u8> {
+        assert_eq!(self.kind, SSH_FXP_DATA, "expected DATA");
+        self.reader().string().unwrap().to_vec()
+    }
+
+    fn attrs(&self) -> FileAttrs {
+        assert_eq!(
+            self.kind,
+            SSH_FXP_ATTRS,
+            "expected ATTRS, got status {:?}",
+            self.try_status()
+        );
+        FileAttrs::decode(&mut self.reader()).unwrap()
+    }
+
+    fn names(&self) -> Vec<(Vec<u8>, Vec<u8>, FileAttrs)> {
+        assert_eq!(
+            self.kind,
+            SSH_FXP_NAME,
+            "expected NAME, got status {:?}",
+            self.try_status()
+        );
+        let mut r = self.reader();
+        let n = r.u32().unwrap();
+        (0..n)
+            .map(|_| {
+                let name = r.string().unwrap().to_vec();
+                let long = r.string().unwrap().to_vec();
+                (name, long, FileAttrs::decode(&mut r).unwrap())
+            })
+            .collect()
+    }
+
+    fn try_status(&self) -> Option<u32> {
+        (self.kind == SSH_FXP_STATUS).then(|| self.reader().u32().unwrap())
+    }
+}
+
+struct Client {
+    server: Server,
+    next_id: u32,
+}
+
+impl Client {
+    fn new() -> Self {
+        let mut c = Client {
+            server: Server::new(),
+            next_id: 1,
+        };
+        let mut w = Writer::new(SSH_FXP_INIT);
+        w.u32(3);
+        let reply = c.raw(&w.finish()).unwrap();
+        assert_eq!(reply.kind, SSH_FXP_VERSION);
+        c
+    }
+
+    /// Send one framed packet, return the single reply.
+    fn raw(&mut self, framed: &[u8]) -> Result<Reply, ferrisftp::server::Fatal> {
+        let mut out = Vec::new();
+        self.server.process(&framed[4..], &mut out)?;
+        let len = u32::from_be_bytes(out[..4].try_into().unwrap()) as usize;
+        assert_eq!(len + 4, out.len(), "exactly one reply");
+        Ok(Reply {
+            kind: out[4],
+            body: out[5..].to_vec(),
+        })
+    }
+
+    /// Build a request with a fresh id; `f` appends the body after the id.
+    fn req(&mut self, kind: u8, f: impl FnOnce(&mut Writer)) -> Reply {
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut w = Writer::new(kind);
+        w.u32(id);
+        f(&mut w);
+        let reply = self.raw(&w.finish()).unwrap();
+        assert_eq!(
+            reply.body[..4],
+            id.to_be_bytes(),
+            "reply carries request id"
+        );
+        reply
+    }
+
+    fn open(&mut self, path: &Path, pflags: u32, attrs: FileAttrs) -> Reply {
+        self.req(SSH_FXP_OPEN, |w| {
+            w.string(path.as_os_str().as_encoded_bytes()).u32(pflags);
+            attrs.encode(w);
+        })
+    }
+
+    fn path_op(&mut self, kind: u8, path: &Path) -> Reply {
+        self.req(kind, |w| {
+            w.string(path.as_os_str().as_encoded_bytes());
+        })
+    }
+
+    fn handle_op(&mut self, kind: u8, handle: &[u8]) -> Reply {
+        self.req(kind, |w| {
+            w.string(handle);
+        })
+    }
+
+    fn write(&mut self, handle: &[u8], offset: u64, data: &[u8]) -> Reply {
+        self.req(SSH_FXP_WRITE, |w| {
+            w.string(handle).u64(offset).string(data);
+        })
+    }
+
+    fn read(&mut self, handle: &[u8], offset: u64, len: u32) -> Reply {
+        self.req(SSH_FXP_READ, |w| {
+            w.string(handle).u64(offset).u32(len);
+        })
+    }
+
+    fn two_paths(&mut self, kind: u8, a: &Path, b: &Path) -> Reply {
+        self.req(kind, |w| {
+            w.string(a.as_os_str().as_encoded_bytes())
+                .string(b.as_os_str().as_encoded_bytes());
+        })
+    }
+}
+
+fn perms(mode: u32) -> FileAttrs {
+    FileAttrs {
+        permissions: Some(mode),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn version_negotiation() {
+    let mut s = Server::new();
+    let mut out = Vec::new();
+    let mut w = Writer::new(SSH_FXP_INIT);
+    w.u32(6).u32(0); // v6 client; trailing bytes as if extensions followed
+    s.process(&w.finish()[4..], &mut out).unwrap();
+    assert_eq!(out[4], SSH_FXP_VERSION);
+    assert_eq!(&out[5..9], &3u32.to_be_bytes());
+}
+
+#[test]
+fn request_before_init_is_fatal() {
+    let mut s = Server::new();
+    let mut w = Writer::new(SSH_FXP_STAT);
+    w.u32(1).string(b"/");
+    assert!(s.process(&w.finish()[4..], &mut Vec::new()).is_err());
+}
+
+#[test]
+fn duplicate_init_is_fatal() {
+    let mut c = Client::new();
+    let mut w = Writer::new(SSH_FXP_INIT);
+    w.u32(3);
+    assert!(c.raw(&w.finish()).is_err());
+}
+
+#[test]
+fn write_then_read() {
+    let t = TempDir::new();
+    let p = t.path("f");
+    let mut c = Client::new();
+
+    let h = c
+        .open(
+            &p,
+            SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_TRUNC,
+            perms(0o600),
+        )
+        .handle();
+    assert_eq!(c.write(&h, 0, b"hello ").status(), SSH_FX_OK);
+    assert_eq!(c.write(&h, 6, b"world").status(), SSH_FX_OK);
+    assert_eq!(c.handle_op(SSH_FXP_CLOSE, &h).status(), SSH_FX_OK);
+    assert_eq!(fs::read(&p).unwrap(), b"hello world");
+    // umask may only clear bits; 0600 has nothing a normal umask removes.
+    assert_eq!(
+        fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+
+    let h = c.open(&p, SSH_FXF_READ, FileAttrs::default()).handle();
+    assert_eq!(c.read(&h, 0, 5).data(), b"hello");
+    assert_eq!(c.read(&h, 6, 100).data(), b"world");
+    assert_eq!(c.read(&h, 11, 100).status(), SSH_FX_EOF);
+    assert_eq!(c.handle_op(SSH_FXP_CLOSE, &h).status(), SSH_FX_OK);
+    // Closed handles are gone.
+    assert_eq!(c.read(&h, 0, 1).status(), SSH_FX_FAILURE);
+}
+
+#[test]
+fn large_read_is_capped() {
+    let t = TempDir::new();
+    let p = t.path("big");
+    fs::write(&p, vec![7u8; 512 * 1024]).unwrap();
+    let mut c = Client::new();
+    let h = c.open(&p, SSH_FXF_READ, FileAttrs::default()).handle();
+    let data = c.read(&h, 0, u32::MAX).data();
+    assert_eq!(data.len(), MAX_READ_LEN as usize);
+}
+
+#[test]
+fn append_mode() {
+    let t = TempDir::new();
+    let p = t.path("log");
+    fs::write(&p, b"one\n").unwrap();
+    let mut c = Client::new();
+    let h = c
+        .open(&p, SSH_FXF_WRITE | SSH_FXF_APPEND, FileAttrs::default())
+        .handle();
+    assert_eq!(c.write(&h, 0, b"two\n").status(), SSH_FX_OK);
+    c.handle_op(SSH_FXP_CLOSE, &h);
+    assert_eq!(fs::read(&p).unwrap(), b"one\ntwo\n");
+}
+
+#[test]
+fn open_errors() {
+    let t = TempDir::new();
+    let mut c = Client::new();
+    assert_eq!(
+        c.open(&t.path("missing"), SSH_FXF_READ, FileAttrs::default())
+            .status(),
+        SSH_FX_NO_SUCH_FILE
+    );
+    fs::write(t.path("exists"), b"").unwrap();
+    assert_eq!(
+        c.open(
+            &t.path("exists"),
+            SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_EXCL,
+            FileAttrs::default()
+        )
+        .status(),
+        SSH_FX_FAILURE
+    );
+    // Create without write access is legal in SFTP.
+    let h = c
+        .open(
+            &t.path("created"),
+            SSH_FXF_READ | SSH_FXF_CREAT,
+            FileAttrs::default(),
+        )
+        .handle();
+    c.handle_op(SSH_FXP_CLOSE, &h);
+    assert!(t.path("created").exists());
+}
+
+#[test]
+fn stat_family_and_setstat() {
+    let t = TempDir::new();
+    let p = t.path("f");
+    fs::write(&p, b"12345").unwrap();
+    std::os::unix::fs::symlink("f", t.path("link")).unwrap();
+    let mut c = Client::new();
+
+    let a = c.path_op(SSH_FXP_STAT, &p).attrs();
+    assert_eq!(a.size, Some(5));
+    assert_eq!(a.permissions.unwrap() & 0o170000, 0o100000);
+
+    let l = c.path_op(SSH_FXP_LSTAT, &t.path("link")).attrs();
+    assert_eq!(l.permissions.unwrap() & 0o170000, 0o120000);
+    let s = c.path_op(SSH_FXP_STAT, &t.path("link")).attrs();
+    assert_eq!(s.size, Some(5));
+
+    let set = FileAttrs {
+        size: Some(2),
+        permissions: Some(0o640),
+        times: Some((1_000_000_000, 1_234_567_890)),
+        ..Default::default()
+    };
+    let r = c.req(SSH_FXP_SETSTAT, |w| {
+        w.string(p.as_os_str().as_encoded_bytes());
+        set.encode(w);
+    });
+    assert_eq!(r.status(), SSH_FX_OK);
+    let a = c.path_op(SSH_FXP_STAT, &p).attrs();
+    assert_eq!(a.size, Some(2));
+    assert_eq!(a.permissions.unwrap() & 0o7777, 0o640);
+    assert_eq!(a.times, Some((1_000_000_000, 1_234_567_890)));
+
+    let h = c.open(&p, SSH_FXF_WRITE, FileAttrs::default()).handle();
+    let set = FileAttrs {
+        size: Some(0),
+        permissions: Some(0o600),
+        times: Some((5, 6)),
+        ..Default::default()
+    };
+    let r = c.req(SSH_FXP_FSETSTAT, |w| {
+        w.string(&h);
+        set.encode(w);
+    });
+    assert_eq!(r.status(), SSH_FX_OK);
+    let a = c.handle_op(SSH_FXP_FSTAT, &h).attrs();
+    assert_eq!(a.size, Some(0));
+    assert_eq!(a.permissions.unwrap() & 0o7777, 0o600);
+    assert_eq!(a.times, Some((5, 6)));
+
+    assert_eq!(
+        c.path_op(SSH_FXP_STAT, &t.path("nope")).status(),
+        SSH_FX_NO_SUCH_FILE
+    );
+}
+
+#[test]
+fn directories() {
+    let t = TempDir::new();
+    let d = t.path("dir");
+    let mut c = Client::new();
+
+    assert_eq!(
+        c.req(SSH_FXP_MKDIR, |w| {
+            w.string(d.as_os_str().as_encoded_bytes());
+            perms(0o750).encode(w);
+        })
+        .status(),
+        SSH_FX_OK
+    );
+    assert_eq!(
+        fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+        0o750
+    );
+
+    for i in 0..250 {
+        fs::write(d.join(format!("file{i:03}")), b"x").unwrap();
+    }
+
+    let h = c.path_op(SSH_FXP_OPENDIR, &d).handle();
+    let mut seen = Vec::new();
+    loop {
+        let r = c.handle_op(SSH_FXP_READDIR, &h);
+        if r.try_status() == Some(SSH_FX_EOF) {
+            break;
+        }
+        let batch = r.names();
+        assert!(batch.len() <= READDIR_BATCH);
+        for (name, long, attrs) in batch {
+            let long = String::from_utf8(long).unwrap();
+            assert!(long.ends_with(std::str::from_utf8(&name).unwrap()));
+            assert!(attrs.permissions.is_some());
+            seen.push(String::from_utf8(name).unwrap());
+        }
+    }
+    c.handle_op(SSH_FXP_CLOSE, &h);
+    assert_eq!(seen.len(), 252);
+    assert!(seen.contains(&".".into()) && seen.contains(&"..".into()));
+    assert!(seen.contains(&"file249".into()));
+
+    // READDIR on a file handle is rejected.
+    fs::write(t.path("plain"), b"").unwrap();
+    let fh = c
+        .open(&t.path("plain"), SSH_FXF_READ, FileAttrs::default())
+        .handle();
+    assert_eq!(c.handle_op(SSH_FXP_READDIR, &fh).status(), SSH_FX_FAILURE);
+
+    // Non-empty rmdir fails; after cleanup it works.
+    assert_eq!(c.path_op(SSH_FXP_RMDIR, &d).status(), SSH_FX_FAILURE);
+    for i in 0..250 {
+        let f = d.join(format!("file{i:03}"));
+        assert_eq!(c.path_op(SSH_FXP_REMOVE, &f).status(), SSH_FX_OK);
+    }
+    assert_eq!(c.path_op(SSH_FXP_RMDIR, &d).status(), SSH_FX_OK);
+    assert!(!d.exists());
+
+    assert_eq!(
+        c.path_op(SSH_FXP_OPENDIR, &t.path("missing")).status(),
+        SSH_FX_NO_SUCH_FILE
+    );
+}
+
+#[test]
+fn rename_does_not_overwrite() {
+    let t = TempDir::new();
+    let (a, b, c_) = (t.path("a"), t.path("b"), t.path("c"));
+    fs::write(&a, b"A").unwrap();
+    fs::write(&b, b"B").unwrap();
+    let mut c = Client::new();
+
+    assert_eq!(c.two_paths(SSH_FXP_RENAME, &a, &b).status(), SSH_FX_FAILURE);
+    assert_eq!(fs::read(&b).unwrap(), b"B");
+    assert_eq!(c.two_paths(SSH_FXP_RENAME, &a, &c_).status(), SSH_FX_OK);
+    assert!(!a.exists());
+    assert_eq!(fs::read(&c_).unwrap(), b"A");
+
+    // Directories take the non-link path.
+    fs::create_dir(t.path("d1")).unwrap();
+    assert_eq!(
+        c.two_paths(SSH_FXP_RENAME, &t.path("d1"), &t.path("d2"))
+            .status(),
+        SSH_FX_OK
+    );
+    assert!(t.path("d2").is_dir());
+}
+
+#[test]
+fn symlink_uses_openssh_argument_order() {
+    let t = TempDir::new();
+    let mut c = Client::new();
+    // target first, link path second
+    let r = c.req(SSH_FXP_SYMLINK, |w| {
+        w.string(b"some/target")
+            .string(t.path("ln").as_os_str().as_encoded_bytes());
+    });
+    assert_eq!(r.status(), SSH_FX_OK);
+    assert_eq!(
+        fs::read_link(t.path("ln")).unwrap(),
+        PathBuf::from("some/target")
+    );
+    let names = c.path_op(SSH_FXP_READLINK, &t.path("ln")).names();
+    assert_eq!(names[0].0, b"some/target");
+}
+
+#[test]
+fn realpath() {
+    let t = TempDir::new();
+    fs::create_dir(t.path("sub")).unwrap();
+    let canon = fs::canonicalize(&t.0).unwrap();
+    let mut c = Client::new();
+
+    let dotted = t.0.join("sub/../sub");
+    let names = c.path_op(SSH_FXP_REALPATH, &dotted).names();
+    assert_eq!(names.len(), 1);
+    assert_eq!(
+        Path::new(std::str::from_utf8(&names[0].0).unwrap()),
+        canon.join("sub")
+    );
+
+    // Non-existent final component resolves via its parent.
+    let names = c.path_op(SSH_FXP_REALPATH, &t.path("sub/new.txt")).names();
+    assert_eq!(
+        Path::new(std::str::from_utf8(&names[0].0).unwrap()),
+        canon.join("sub/new.txt")
+    );
+
+    // Empty path is the working directory.
+    let names = c.path_op(SSH_FXP_REALPATH, Path::new("")).names();
+    assert_eq!(
+        Path::new(std::str::from_utf8(&names[0].0).unwrap()),
+        std::env::current_dir().unwrap()
+    );
+}
+
+#[test]
+fn bad_requests() {
+    let mut c = Client::new();
+    // Truncated body after the id → BAD_MESSAGE, session continues.
+    let r = c.req(SSH_FXP_OPEN, |w| {
+        w.u32(1000); // string length with no bytes behind it
+    });
+    assert_eq!(r.status(), SSH_FX_BAD_MESSAGE);
+    // Unknown handle.
+    assert_eq!(c.handle_op(SSH_FXP_CLOSE, b"nope").status(), SSH_FX_FAILURE);
+    // Extensions are not implemented yet.
+    let r = c.req(SSH_FXP_EXTENDED, |w| {
+        w.string(b"statvfs@openssh.com").string(b"/");
+    });
+    assert_eq!(r.status(), SSH_FX_OP_UNSUPPORTED);
+    // Unknown packet type.
+    assert_eq!(c.req(99, |_| {}).status(), SSH_FX_OP_UNSUPPORTED);
+    // Still alive.
+    assert_eq!(
+        c.path_op(SSH_FXP_STAT, Path::new("/"))
+            .attrs()
+            .permissions
+            .unwrap()
+            & 0o170000,
+        0o040000
+    );
+}
+
+#[test]
+fn run_over_streams() {
+    let mut input = Vec::new();
+    let mut w = Writer::new(SSH_FXP_INIT);
+    w.u32(3);
+    input.extend(w.finish());
+    for id in 1..=3 {
+        let mut w = Writer::new(SSH_FXP_STAT);
+        w.u32(id).string(b"/");
+        input.extend(w.finish());
+    }
+    let mut output = Vec::new();
+    Server::new().run(Cursor::new(input), &mut output).unwrap();
+
+    let mut r = Reader::new(&output);
+    let mut kinds = Vec::new();
+    while r.remaining() > 0 {
+        let body = r.string().unwrap();
+        kinds.push(body[0]);
+    }
+    assert_eq!(
+        kinds,
+        [SSH_FXP_VERSION, SSH_FXP_ATTRS, SSH_FXP_ATTRS, SSH_FXP_ATTRS]
+    );
+}
+
+#[test]
+fn oversized_packet_ends_session() {
+    let mut input = Vec::new();
+    let mut w = Writer::new(SSH_FXP_INIT);
+    w.u32(3);
+    input.extend(w.finish());
+    input.extend((MAX_PACKET_LEN + 1).to_be_bytes());
+    let mut output = Vec::new();
+    assert!(Server::new().run(Cursor::new(input), &mut output).is_err());
+}

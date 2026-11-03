@@ -16,7 +16,43 @@ over stdin/stdout. That keeps the code small and the attack surface narrow.
 
 ## Status
 
-Early development — not yet ready for use.
+Early development — not yet ready for production use.
+
+Implemented: all SFTP v3 requests (open/close/read/write, stat family,
+setstat, directories, remove, rename, realpath, readlink, symlink).
+Not yet: OpenSSH extensions (`posix-rename`, `statvfs`, `limits`, …),
+pipelined/threaded request handling, read-only and chroot modes.
+
+## Building
+
+```sh
+cargo build --release
+```
+
+## Usage
+
+ferrisftp is started by the SSH server, not by hand.
+
+**Dropbear** looks for the SFTP server at a fixed path (usually
+`/usr/libexec/sftp-server`); point that at ferrisftp:
+
+```sh
+install -m 755 target/release/ferrisftp /usr/local/bin/ferrisftp
+ln -sf /usr/local/bin/ferrisftp /usr/libexec/sftp-server
+```
+
+**OpenSSH** — in `sshd_config`:
+
+```
+Subsystem sftp /usr/local/bin/ferrisftp
+```
+
+For local testing without any SSH server, the OpenSSH client can run it
+directly:
+
+```sh
+sftp -D ./target/release/ferrisftp
+```
 
 ## License
 
