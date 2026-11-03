@@ -108,6 +108,25 @@ directly:
 sftp -D ./target/release/ferrisftp
 ```
 
+## Fuzzing
+
+Two [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) targets live
+in `fuzz/` (nightly toolchain required):
+
+- `decode` — the wire primitives and ATTRS decoding, including an
+  encode/decode round-trip check
+- `session` — whole sessions on arbitrary input: framing, handshake,
+  every request parser and the extension dispatcher. The server runs
+  read-only, so random requests cannot change files on the fuzzing
+  machine.
+
+```sh
+cd fuzz
+cargo +nightly fuzz run session
+```
+
+CI runs both briefly on every pull request.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

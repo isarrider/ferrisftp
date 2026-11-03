@@ -40,3 +40,22 @@ jobs:
           sftp -b /tmp/interop/batch -D "$PWD/target/release/ferrisftp"
           cmp /tmp/interop/src.bin /tmp/interop/back.bin
           cmp /tmp/interop/src.bin /tmp/interop/copy-back.bin
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz the decoder
+        run: cargo fuzz run decode -- -max_total_time=60
+        working-directory: fuzz
+      - name: Fuzz read-only sessions
+        run: cargo fuzz run session -- -max_total_time=120 -timeout=10
+        working-directory: fuzz
+      - name: Keep crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

@@ -63,6 +63,53 @@ fn version_advertises_extensions() {
     }
 }
 
+/// Extension data advertised in VERSION, by name.
+fn version_extension(name: &str) -> Vec<u8> {
+    let mut s = Server::new();
+    let mut out = Vec::new();
+    s.process(&init_packet()[4..], &mut out).unwrap();
+    let mut r = Reader::new(&out[5..]);
+    r.u32().unwrap();
+    while r.remaining() > 0 {
+        let n = r.string().unwrap();
+        let data = r.string().unwrap();
+        if n == name.as_bytes() {
+            return data.to_vec();
+        }
+    }
+    panic!("{name} not advertised");
+}
+
+#[test]
+fn vendor_id() {
+    let data = version_extension("vendor-id");
+    let mut r = Reader::new(&data);
+    assert_eq!(r.string().unwrap(), b"isarrider");
+    assert_eq!(r.string().unwrap(), b"ferrisftp");
+    assert_eq!(r.string().unwrap(), env!("CARGO_PKG_VERSION").as_bytes());
+    r.u64().unwrap();
+    assert_eq!(r.remaining(), 0);
+}
+
+#[test]
+fn symlink_order_matches_behaviour() {
+    assert_eq!(
+        version_extension("symlink-order@rjk.greenend.org.uk"),
+        b"targetpath-linkpath"
+    );
+    // ...and SYMLINK really takes the target first.
+    let t = TempDir::new();
+    let mut c = Client::new();
+    let r = c.req(SSH_FXP_SYMLINK, |w| {
+        w.string(b"the-target").string(bytes(&t.path("the-link")));
+    });
+    assert_eq!(r.status(), SSH_FX_OK);
+    assert_eq!(
+        fs::read_link(t.path("the-link")).unwrap(),
+        PathBuf::from("the-target")
+    );
+}
+
 #[test]
 fn posix_rename_overwrites() {
     let t = TempDir::new();
