@@ -3,60 +3,12 @@
 //! SFTP v3 clients display this field verbatim, and some parse it, so the
 //! layout follows what OpenSSH's sftp-server produces.
 
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Caches uid/gid → name lookups for the lifetime of the session.
-#[derive(Default)]
-pub struct NameCache {
-    users: HashMap<u32, String>,
-    groups: HashMap<u32, String>,
-}
-
-impl NameCache {
-    pub fn user(&mut self, uid: u32) -> &str {
-        self.users
-            .entry(uid)
-            .or_insert_with(|| lookup_user(uid).unwrap_or_else(|| uid.to_string()))
-    }
-
-    pub fn group(&mut self, gid: u32) -> &str {
-        self.groups
-            .entry(gid)
-            .or_insert_with(|| lookup_group(gid).unwrap_or_else(|| gid.to_string()))
-    }
-}
-
-fn lookup_user(uid: u32) -> Option<String> {
-    let mut buf = vec![0 as libc::c_char; 4096];
-    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut result: *mut libc::passwd = std::ptr::null_mut();
-    // SAFETY: all pointers refer to live, correctly sized buffers.
-    let rc = unsafe { libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result) };
-    if rc != 0 || result.is_null() || pwd.pw_name.is_null() {
-        return None;
-    }
-    // SAFETY: getpwuid_r succeeded, so pw_name points into `buf`.
-    let name = unsafe { CStr::from_ptr(pwd.pw_name) };
-    Some(name.to_string_lossy().into_owned())
-}
-
-fn lookup_group(gid: u32) -> Option<String> {
-    let mut buf = vec![0 as libc::c_char; 4096];
-    let mut grp: libc::group = unsafe { std::mem::zeroed() };
-    let mut result: *mut libc::group = std::ptr::null_mut();
-    // SAFETY: all pointers refer to live, correctly sized buffers.
-    let rc = unsafe { libc::getgrgid_r(gid, &mut grp, buf.as_mut_ptr(), buf.len(), &mut result) };
-    if rc != 0 || result.is_null() || grp.gr_name.is_null() {
-        return None;
-    }
-    // SAFETY: getgrgid_r succeeded, so gr_name points into `buf`.
-    let name = unsafe { CStr::from_ptr(grp.gr_name) };
-    Some(name.to_string_lossy().into_owned())
-}
+use crate::sys::NameCache;
 
 /// Ten-character mode string, e.g. `drwxr-xr-x`.
 pub fn mode_string(mode: u32) -> String {
@@ -120,8 +72,13 @@ fn date_string(mtime: i64) -> String {
 
 /// Build the longname for one directory entry.
 pub fn longname(name: &[u8], m: &Metadata, names: &mut NameCache) -> Vec<u8> {
-    let user = names.user(m.uid()).to_owned();
-    let group = names.group(m.gid());
+    // Unknown ids are shown numerically, like ls does.
+    let user = names
+        .user(m.uid())
+        .map_or_else(|| m.uid().to_string(), str::to_owned);
+    let group = names
+        .group(m.gid())
+        .map_or_else(|| m.gid().to_string(), str::to_owned);
     let head = format!(
         "{} {:>4} {:<8} {:<8} {:>8} {} ",
         mode_string(m.mode()),
@@ -148,13 +105,5 @@ mod tests {
         assert_eq!(mode_string(0o041777), "drwxrwxrwt");
         assert_eq!(mode_string(0o120777), "lrwxrwxrwx");
         assert_eq!(mode_string(0o102644), "-rw-r-Sr--");
-    }
-
-    #[test]
-    fn root_names_resolve() {
-        let mut c = NameCache::default();
-        assert_eq!(c.user(0), "root");
-        // Unknown ids fall back to the number.
-        assert_eq!(c.user(4_000_000_000), "4000000000");
     }
 }

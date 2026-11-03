@@ -28,8 +28,15 @@ jobs:
           rename d/f.bin d/g.bin
           ls -la d
           get d/g.bin /tmp/interop/back.bin
-          rm d/g.bin
+          df -h d
+          ln d/g.bin d/hard.bin
+          ln -s g.bin d/soft.bin
+          cp d/g.bin d/copy.bin
+          ls -l d
+          get d/copy.bin /tmp/interop/copy-back.bin
+          rm d/*
           rmdir d
           EOF
           sftp -b /tmp/interop/batch -D "$PWD/target/release/ferrisftp"
           cmp /tmp/interop/src.bin /tmp/interop/back.bin
+          cmp /tmp/interop/src.bin /tmp/interop/copy-back.bin

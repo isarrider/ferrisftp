@@ -11,8 +11,9 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::attrs::FileAttrs;
 use crate::handles::{Handle, HandleTable};
-use crate::longname::{NameCache, longname};
+use crate::longname::longname;
 use crate::protocol::*;
+use crate::sys::NameCache;
 use crate::wire::{DecodeError, DecodeResult, Reader, Writer};
 
 /// The client broke the protocol badly enough that the session must end.
@@ -28,24 +29,24 @@ impl std::fmt::Display for Fatal {
 impl std::error::Error for Fatal {}
 
 /// Outcome of one operation: a reply packet, or a status code to send.
-type OpResult = Result<Vec<u8>, Status>;
+pub(crate) type OpResult = Result<Vec<u8>, Status>;
 
 /// An SFTP status reply that is not `SSH_FX_OK`.
 #[derive(Debug)]
-struct Status {
-    code: u32,
-    message: String,
+pub(crate) struct Status {
+    pub(crate) code: u32,
+    pub(crate) message: String,
 }
 
 impl Status {
-    fn new(code: u32, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: u32, message: impl Into<String>) -> Self {
         Status {
             code,
             message: message.into(),
         }
     }
 
-    fn bad_handle() -> Self {
+    pub(crate) fn bad_handle() -> Self {
         Status::new(SSH_FX_FAILURE, "Invalid handle")
     }
 }
@@ -74,7 +75,7 @@ fn error_message(e: &io::Error) -> String {
     }
 }
 
-fn status_text(code: u32) -> &'static str {
+pub(crate) fn status_text(code: u32) -> &'static str {
     match code {
         SSH_FX_OK => "Success",
         SSH_FX_EOF => "End of file",
@@ -92,27 +93,27 @@ fn status_packet(id: u32, code: u32, message: &str) -> Vec<u8> {
     w.finish()
 }
 
-fn ok(id: u32) -> OpResult {
+pub(crate) fn ok(id: u32) -> OpResult {
     Ok(status_packet(id, SSH_FX_OK, status_text(SSH_FX_OK)))
 }
 
-fn path_from(bytes: &[u8]) -> &Path {
+pub(crate) fn path_from(bytes: &[u8]) -> &Path {
     Path::new(OsStr::from_bytes(bytes))
 }
 
-fn cstring(path: &Path) -> Result<CString, Status> {
+pub(crate) fn cstring(path: &Path) -> Result<CString, Status> {
     CString::new(path.as_os_str().as_bytes())
         .map_err(|_| Status::new(SSH_FX_FAILURE, "Path contains NUL byte"))
 }
 
-fn last_os_error<T>() -> Result<T, Status> {
+pub(crate) fn last_os_error<T>() -> Result<T, Status> {
     Err(io::Error::last_os_error().into())
 }
 
 pub struct Server {
     initialized: bool,
-    handles: HandleTable,
-    names: NameCache,
+    pub(crate) handles: HandleTable,
+    pub(crate) names: NameCache,
     read_buf: Vec<u8>,
 }
 
@@ -184,6 +185,9 @@ impl Server {
             self.initialized = true;
             let mut w = Writer::new(SSH_FXP_VERSION);
             w.u32(client_version.min(SFTP_VERSION));
+            for (name, version) in crate::extensions::ADVERTISED {
+                w.string(name.as_bytes()).string(version.as_bytes());
+            }
             out.extend_from_slice(&w.finish());
             return Ok(());
         }
@@ -313,11 +317,8 @@ impl Server {
                     .and_then(|()| ok(id))
             }
             SSH_FXP_EXTENDED => {
-                let _request = r.string()?;
-                Err(Status::new(
-                    SSH_FX_OP_UNSUPPORTED,
-                    status_text(SSH_FX_OP_UNSUPPORTED),
-                ))
+                let request = r.string()?;
+                return self.extended(id, request, r);
             }
             _ => Err(Status::new(
                 SSH_FX_OP_UNSUPPORTED,
@@ -475,7 +476,7 @@ fn attrs_reply(id: u32, meta: io::Result<fs::Metadata>) -> OpResult {
 
 /// A NAME reply with one entry and empty attributes, as used by REALPATH
 /// and READLINK.
-fn single_name(id: u32, name: &[u8]) -> Vec<u8> {
+pub(crate) fn single_name(id: u32, name: &[u8]) -> Vec<u8> {
     let mut w = Writer::new(SSH_FXP_NAME);
     w.u32(id).u32(1).string(name).string(name);
     FileAttrs::default().encode(&mut w);
@@ -543,7 +544,7 @@ fn fsetstat(file: &File, attrs: &FileAttrs) -> Result<(), Status> {
 /// Canonicalize a path. An empty path means the current directory. If the
 /// final component does not exist yet, resolve its parent instead, since
 /// clients use REALPATH on upload targets before creating them.
-fn realpath(path: &Path) -> Result<PathBuf, Status> {
+pub(crate) fn realpath(path: &Path) -> Result<PathBuf, Status> {
     let path = if path.as_os_str().is_empty() {
         Path::new(".")
     } else {
