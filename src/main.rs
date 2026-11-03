@@ -1,4 +1,5 @@
-use std::io;
+use std::fs::File;
+use std::os::fd::FromRawFd;
 use std::process::ExitCode;
 
 use ferrisftp::Server;
@@ -32,7 +33,13 @@ fn main() -> ExitCode {
     }
 
     let mut server = Server::new();
-    match server.run(io::stdin().lock(), io::stdout().lock()) {
+    // Use the raw descriptors: std's stdout is line-buffered and would
+    // flush at every newline byte in file data. run() does its own
+    // buffering.
+    // SAFETY: fds 0 and 1 are open for the life of the process and nothing
+    // else in this program uses them.
+    let (stdin, stdout) = unsafe { (File::from_raw_fd(0), File::from_raw_fd(1)) };
+    match server.run(stdin, stdout) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("ferrisftp: {e}");
