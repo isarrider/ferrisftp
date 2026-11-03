@@ -17,6 +17,7 @@ impl std::error::Error for DecodeError {}
 pub type DecodeResult<T> = Result<T, DecodeError>;
 
 /// Cursor over a received packet body.
+#[derive(Clone)]
 pub struct Reader<'a> {
     buf: &'a [u8],
 }

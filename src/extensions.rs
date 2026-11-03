@@ -220,26 +220,8 @@ impl Server {
     }
 }
 
-/// Expand a leading `~` or `~user` the way a shell would.
 fn expand_path(path: &[u8]) -> Result<PathBuf, Status> {
-    let Some(rest) = path.strip_prefix(b"~") else {
-        return Ok(path_from(path).to_path_buf());
-    };
-    let (user, tail) = match rest.iter().position(|&b| b == b'/') {
-        Some(i) => (&rest[..i], &rest[i + 1..]),
-        None => (rest, &b""[..]),
-    };
-    let home = if user.is_empty() {
-        sys::current_home()
-    } else {
-        sys::passwd_by_name(user).map(|p| p.home)
-    }
-    .ok_or_else(|| Status::new(SSH_FX_NO_SUCH_FILE, "No such user"))?;
-    Ok(if tail.is_empty() {
-        home
-    } else {
-        home.join(path_from(tail))
-    })
+    sys::expand_tilde(path).ok_or_else(|| Status::new(SSH_FX_NO_SUCH_FILE, "No such user"))
 }
 
 #[allow(clippy::unnecessary_cast)] // field types vary between libc targets

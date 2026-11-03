@@ -5,9 +5,11 @@
 //! SFTP stream on stdin/stdout.
 
 pub mod attrs;
+pub mod cli;
 pub mod extensions;
 pub mod handles;
 pub mod longname;
+pub mod policy;
 pub mod protocol;
 pub mod server;
 pub mod sys;

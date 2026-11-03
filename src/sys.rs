@@ -90,6 +90,29 @@ pub fn current_home() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
 }
 
+/// Expand a leading `~` or `~user` the way a shell would. Paths without
+/// a leading tilde are returned unchanged; `None` means the user does not
+/// exist.
+pub fn expand_tilde(path: &[u8]) -> Option<PathBuf> {
+    let Some(rest) = path.strip_prefix(b"~") else {
+        return Some(PathBuf::from(OsStr::from_bytes(path)));
+    };
+    let (user, tail) = match rest.iter().position(|&b| b == b'/') {
+        Some(i) => (&rest[..i], &rest[i + 1..]),
+        None => (rest, &b""[..]),
+    };
+    let home = if user.is_empty() {
+        current_home()
+    } else {
+        passwd_by_name(user).map(|p| p.home)
+    }?;
+    Some(if tail.is_empty() {
+        home
+    } else {
+        home.join(OsStr::from_bytes(tail))
+    })
+}
+
 /// Caches uid/gid → name lookups for the lifetime of the session.
 #[derive(Default)]
 pub struct NameCache {
