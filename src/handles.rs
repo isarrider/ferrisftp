@@ -13,6 +13,10 @@ use crate::protocol::MAX_HANDLES;
 pub enum Handle {
     File {
         file: File,
+        /// The path as the client sent it, for logging.
+        path: PathBuf,
+        bytes_read: u64,
+        bytes_written: u64,
     },
     Dir {
         path: PathBuf,
@@ -76,6 +80,9 @@ mod tests {
     fn file_handle() -> Handle {
         Handle::File {
             file: File::open("/dev/null").unwrap(),
+            path: "/dev/null".into(),
+            bytes_read: 0,
+            bytes_written: 0,
         }
     }
 

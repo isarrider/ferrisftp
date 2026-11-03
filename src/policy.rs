@@ -87,6 +87,11 @@ fn lookup(packet: u8, extension: Option<&[u8]>) -> Option<&'static RequestKind> 
     })
 }
 
+/// The `-p` / `-P` name of a request, if it is one we know.
+pub fn request_name(packet: u8, extension: Option<&[u8]>) -> Option<&'static str> {
+    lookup(packet, extension).map(|r| r.name)
+}
+
 /// `-p` / `-P` named a request that does not exist.
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnknownRequest(pub String);

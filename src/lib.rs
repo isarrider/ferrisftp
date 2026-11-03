@@ -8,6 +8,7 @@ pub mod attrs;
 pub mod cli;
 pub mod extensions;
 pub mod handles;
+pub mod log;
 pub mod longname;
 pub mod policy;
 pub mod protocol;

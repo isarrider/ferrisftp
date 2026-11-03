@@ -27,9 +27,9 @@ Implemented:
   `home-directory`, `users-groups-by-id`
 - Command-line options compatible with OpenSSH's sftp-server: read-only
   mode, start directory, umask, request allow/deny lists
+- Logging to syslog or stderr, with OpenSSH's levels and log lines
 
-Not yet: logging (`-e`, `-f`, `-l` are accepted but do nothing yet),
-prebuilt static binaries.
+Not yet: prebuilt static binaries.
 
 ## Building
 
@@ -68,7 +68,9 @@ keep working.
 | `-P list` | Refuse the listed requests (comma-separated) |
 | `-p list` | Allow only the listed requests |
 | `-Q requests` | Print the request names usable with `-p` / `-P` |
-| `-e`, `-f fac`, `-l level` | Logging options; accepted, not implemented yet |
+| `-l level` | Log level: `QUIET`, `FATAL`, `ERROR` (default), `INFO`, `VERBOSE`, `DEBUG1`–`DEBUG3` |
+| `-f facility` | Syslog facility: `AUTH` (default), `AUTHPRIV`, `DAEMON`, `USER`, `LOCAL0`–`LOCAL7` |
+| `-e` | Log to stderr instead of syslog |
 | `-h`, `-V` | Help, version |
 
 Example — a read-only server that starts in a shared directory:
@@ -78,6 +80,24 @@ Subsystem sftp /usr/local/bin/ferrisftp -R -d /srv/share
 ```
 
 Refused requests get a "Permission denied" status.
+
+### Logging
+
+By default only errors are logged, to syslog as `ferrisftp[pid]`. With
+`-l INFO` every session and file operation is logged in the same format
+as OpenSSH's sftp-server:
+
+```
+session opened for local user alex from [192.0.2.7]
+open "/home/alex/notes.txt" flags WRITE,CREATE,TRUNCATE mode 0644
+close "/home/alex/notes.txt" bytes read 0 written 1832
+remove name "/home/alex/old.txt"
+session closed for local user alex from [192.0.2.7]
+```
+
+`VERBOSE` adds directory listings and refused requests, `DEBUG` every
+request. Control characters in file names are escaped (`\x0a`), so a
+crafted name cannot forge log lines.
 
 ### Testing locally
 

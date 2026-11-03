@@ -12,6 +12,7 @@ use std::fmt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
+use crate::log;
 use crate::policy::Policy;
 use crate::sys;
 
@@ -26,10 +27,12 @@ It speaks the SFTP protocol on stdin/stdout.
 
   -d dir    start in dir instead of the home directory
             (%d = home directory, %u = user name, ~ expands too)
-  -e        log to stderr (accepted; logging is not implemented yet)
-  -f fac    syslog facility (accepted; logging is not implemented yet)
+  -e        log to stderr instead of syslog
+  -f fac    syslog facility: DAEMON, USER, AUTH (default), AUTHPRIV,
+            LOCAL0 … LOCAL7
   -h        show this help
-  -l level  log level (accepted; logging is not implemented yet)
+  -l level  QUIET, FATAL, ERROR (default), INFO, VERBOSE, DEBUG,
+            DEBUG1, DEBUG2 or DEBUG3. INFO logs every file operation.
   -P list   comma-separated requests to refuse
   -p list   comma-separated requests to allow; all others are refused
   -Q requests
@@ -51,6 +54,7 @@ pub struct Options {
     pub policy: Policy,
     pub umask: Option<u32>,
     pub start_dir: Option<String>,
+    pub log: log::Config,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -82,7 +86,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Action, UsageE
         };
         for (i, flag) in flags.char_indices() {
             match flag {
-                'e' => {}
+                'e' => opts.log.stderr = true,
                 'h' => return Ok(Action::Help),
                 'V' => return Ok(Action::Version),
                 'R' => opts.policy.read_only = true,
@@ -97,8 +101,16 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Action, UsageE
                     };
                     match flag {
                         'd' => opts.start_dir = Some(value),
-                        // Logging options are validated once logging exists.
-                        'f' | 'l' => {}
+                        'f' => {
+                            opts.log.facility = log::parse_facility(&value).ok_or_else(|| {
+                                UsageError(format!("unknown log facility '{value}'"))
+                            })?;
+                        }
+                        'l' => {
+                            opts.log.level = log::Level::parse(&value).ok_or_else(|| {
+                                UsageError(format!("unknown log level '{value}'"))
+                            })?;
+                        }
                         'P' => opts
                             .policy
                             .set_denied(&value)
@@ -190,6 +202,9 @@ mod tests {
     fn flags_values_and_bundling() {
         let o = run(&["-eR", "-l", "INFO", "-fAUTH", "-u", "027", "-d/srv/%u"]).unwrap();
         assert!(o.policy.read_only);
+        assert!(o.log.stderr);
+        assert_eq!(o.log.level, log::Level::Info);
+        assert_eq!(o.log.facility, libc::LOG_AUTH);
         assert_eq!(o.umask, Some(0o027));
         assert_eq!(o.start_dir.as_deref(), Some("/srv/%u"));
 
@@ -215,6 +230,8 @@ mod tests {
         assert!(run(&["-u", "abc"]).is_err());
         assert!(run(&["-P", "remove,frobnicate"]).is_err());
         assert!(run(&["stray"]).is_err());
+        assert!(run(&["-l", "LOUD"]).is_err());
+        assert!(run(&["-f", "KERN"]).is_err());
         assert!(run(&["-"]).is_err());
         assert!(parse(["-Q", "ciphers"].map(OsString::from)).is_err());
     }

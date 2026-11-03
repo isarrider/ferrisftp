@@ -11,8 +11,9 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::attrs::FileAttrs;
 use crate::handles::{Handle, HandleTable};
+use crate::log::Quoted;
 use crate::longname::longname;
-use crate::policy::Policy;
+use crate::policy::{Policy, request_name};
 use crate::protocol::*;
 use crate::sys::NameCache;
 use crate::wire::{DecodeError, DecodeResult, Reader, Writer};
@@ -211,7 +212,10 @@ impl Server {
         } else {
             None
         };
+        let name = request_name(kind, extension).unwrap_or("unknown");
+        crate::log_debug!("request {id}: {name}");
         if !self.policy.permits(kind, extension) {
+            crate::log_verbose!("refusing {name} request");
             out.extend_from_slice(&status_packet(
                 id,
                 SSH_FX_PERMISSION_DENIED,
@@ -265,20 +269,24 @@ impl Server {
             SSH_FXP_FSTAT => {
                 let handle = r.string()?;
                 match self.handles.get_mut(handle) {
-                    Some(Handle::File { file }) => attrs_reply(id, file.metadata()),
+                    Some(Handle::File { file, .. }) => attrs_reply(id, file.metadata()),
                     _ => Err(Status::bad_handle()),
                 }
             }
             SSH_FXP_SETSTAT => {
                 let path = r.string()?;
                 let attrs = FileAttrs::decode(r)?;
+                log_setstat(path, &attrs);
                 setstat(path_from(path), &attrs).and_then(|()| ok(id))
             }
             SSH_FXP_FSETSTAT => {
                 let handle = r.string()?;
                 let attrs = FileAttrs::decode(r)?;
                 match self.handles.get_mut(handle) {
-                    Some(Handle::File { file }) => fsetstat(file, &attrs).and_then(|()| ok(id)),
+                    Some(Handle::File { file, path, .. }) => {
+                        log_setstat(path.as_os_str().as_bytes(), &attrs);
+                        fsetstat(file, &attrs).and_then(|()| ok(id))
+                    }
                     _ => Err(Status::bad_handle()),
                 }
             }
@@ -292,6 +300,7 @@ impl Server {
             }
             SSH_FXP_REMOVE => {
                 let path = r.string()?;
+                crate::log_info!("remove name {}", Quoted(path));
                 fs::remove_file(path_from(path))
                     .map_err(Status::from)
                     .and_then(|()| ok(id))
@@ -300,6 +309,7 @@ impl Server {
                 let path = r.string()?;
                 let attrs = FileAttrs::decode(r)?;
                 let mode = attrs.permissions.map_or(0o777, |p| p & 0o7777);
+                crate::log_info!("mkdir name {} mode 0{mode:o}", Quoted(path));
                 DirBuilder::new()
                     .mode(mode)
                     .create(path_from(path))
@@ -308,6 +318,7 @@ impl Server {
             }
             SSH_FXP_RMDIR => {
                 let path = r.string()?;
+                crate::log_info!("rmdir name {}", Quoted(path));
                 fs::remove_dir(path_from(path))
                     .map_err(Status::from)
                     .and_then(|()| ok(id))
@@ -319,6 +330,7 @@ impl Server {
             SSH_FXP_RENAME => {
                 let from = r.string()?;
                 let to = r.string()?;
+                crate::log_info!("rename old {} new {}", Quoted(from), Quoted(to));
                 rename_noreplace(path_from(from), path_from(to)).and_then(|()| ok(id))
             }
             SSH_FXP_READLINK => {
@@ -333,6 +345,7 @@ impl Server {
                 // client in practice follows OpenSSH, so we do too.
                 let target = r.string()?;
                 let link = r.string()?;
+                crate::log_info!("symlink old {} new {}", Quoted(target), Quoted(link));
                 std::os::unix::fs::symlink(path_from(target), path_from(link))
                     .map_err(Status::from)
                     .and_then(|()| ok(id))
@@ -377,6 +390,11 @@ impl Server {
         }
         flags |= libc::O_CLOEXEC;
         let mode = attrs.permissions.map_or(0o666, |p| p & 0o7777);
+        crate::log_info!(
+            "open {} flags {} mode 0{mode:o}",
+            Quoted(path.as_os_str().as_bytes()),
+            open_flags_string(pflags)
+        );
 
         // std's OpenOptions rejects some combinations SFTP allows (e.g.
         // create without write), so call open(2) directly. The umask still
@@ -389,7 +407,15 @@ impl Server {
         }
         // SAFETY: fd is a freshly opened descriptor we exclusively own.
         let file = unsafe { File::from_raw_fd(fd) };
-        self.new_handle(id, Handle::File { file })
+        self.new_handle(
+            id,
+            Handle::File {
+                file,
+                path: path.to_path_buf(),
+                bytes_read: 0,
+                bytes_written: 0,
+            },
+        )
     }
 
     fn new_handle(&mut self, id: u32, handle: Handle) -> OpResult {
@@ -403,16 +429,34 @@ impl Server {
     }
 
     fn close(&mut self, id: u32, handle: &[u8]) -> OpResult {
+        // Dropping the handle closes it; close(2) errors on regular files
+        // are not reported by std, matching common sftp-server behaviour.
         match self.handles.remove(handle) {
-            // Dropping the File closes it; close(2) errors on regular files
-            // are not reported by std, matching common sftp-server behaviour.
-            Some(_) => ok(id),
+            Some(Handle::File {
+                path,
+                bytes_read,
+                bytes_written,
+                ..
+            }) => {
+                crate::log_info!(
+                    "close {} bytes read {bytes_read} written {bytes_written}",
+                    Quoted(path.as_os_str().as_bytes())
+                );
+                ok(id)
+            }
+            Some(Handle::Dir { path, .. }) => {
+                crate::log_info!("closedir {}", Quoted(path.as_os_str().as_bytes()));
+                ok(id)
+            }
             None => Err(Status::bad_handle()),
         }
     }
 
     fn read(&mut self, id: u32, handle: &[u8], offset: u64, len: u32) -> OpResult {
-        let Some(Handle::File { file }) = self.handles.get_mut(handle) else {
+        let Some(Handle::File {
+            file, bytes_read, ..
+        }) = self.handles.get_mut(handle)
+        else {
             return Err(Status::bad_handle());
         };
         let len = len.min(MAX_READ_LEN) as usize;
@@ -426,22 +470,30 @@ impl Server {
         if n == 0 && len > 0 {
             return Err(Status::new(SSH_FX_EOF, status_text(SSH_FX_EOF)));
         }
+        *bytes_read += n as u64;
         let mut w = Writer::with_capacity(SSH_FXP_DATA, 8 + n);
         w.u32(id).string(&self.read_buf[..n]);
         Ok(w.finish())
     }
 
     fn write(&mut self, id: u32, handle: &[u8], offset: u64, data: &[u8]) -> OpResult {
-        let Some(Handle::File { file }) = self.handles.get_mut(handle) else {
+        let Some(Handle::File {
+            file,
+            bytes_written,
+            ..
+        }) = self.handles.get_mut(handle)
+        else {
             return Err(Status::bad_handle());
         };
         // With O_APPEND, Linux ignores the offset and appends, which is the
         // semantics SSH_FXF_APPEND asks for.
         file.write_all_at(data, offset)?;
+        *bytes_written += data.len() as u64;
         ok(id)
     }
 
     fn opendir(&mut self, id: u32, path: &Path) -> OpResult {
+        crate::log_verbose!("opendir {}", Quoted(path.as_os_str().as_bytes()));
         let entries = fs::read_dir(path)?;
         self.new_handle(
             id,
@@ -491,6 +543,40 @@ impl Server {
             FileAttrs::from_metadata(meta).encode(&mut w);
         }
         Ok(w.finish())
+    }
+}
+
+/// OpenSSH-style flag list for open log lines, e.g. `WRITE,CREATE,TRUNCATE`.
+fn open_flags_string(pflags: u32) -> String {
+    const NAMES: [(u32, &str); 6] = [
+        (SSH_FXF_READ, "READ"),
+        (SSH_FXF_WRITE, "WRITE"),
+        (SSH_FXF_APPEND, "APPEND"),
+        (SSH_FXF_CREAT, "CREATE"),
+        (SSH_FXF_TRUNC, "TRUNCATE"),
+        (SSH_FXF_EXCL, "EXCL"),
+    ];
+    let names: Vec<&str> = NAMES
+        .iter()
+        .filter(|(bit, _)| pflags & bit != 0)
+        .map(|(_, name)| *name)
+        .collect();
+    names.join(",")
+}
+
+/// Log the attribute changes of a setstat-family request.
+pub(crate) fn log_setstat(path: &[u8], attrs: &FileAttrs) {
+    if let Some(size) = attrs.size {
+        crate::log_info!("set {} size {size}", Quoted(path));
+    }
+    if let Some(perm) = attrs.permissions {
+        crate::log_info!("set {} mode {:04o}", Quoted(path), perm & 0o7777);
+    }
+    if let Some((atime, mtime)) = attrs.times {
+        crate::log_info!("set {} atime {atime} mtime {mtime}", Quoted(path));
+    }
+    if let Some((uid, gid)) = attrs.uid_gid {
+        crate::log_info!("set {} owner {uid} group {gid}", Quoted(path));
     }
 }
 

@@ -19,11 +19,17 @@ const BIN: &str = env!("CARGO_BIN_EXE_ferrisftp");
 /// Run the binary with `args`, feed it INIT plus `requests`, and return
 /// the (type, body) replies after VERSION.
 fn session(args: &[&str], requests: Vec<Vec<u8>>) -> Vec<(u8, Vec<u8>)> {
+    session_with_stderr(args, requests).0
+}
+
+/// Like `session`, also returning what the server wrote to stderr.
+fn session_with_stderr(args: &[&str], requests: Vec<Vec<u8>>) -> (Vec<(u8, Vec<u8>)>, String) {
     let mut child = Command::new(BIN)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env("SSH_CONNECTION", "192.0.2.7 50000 192.0.2.1 22")
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
@@ -40,7 +46,7 @@ fn session(args: &[&str], requests: Vec<Vec<u8>>) -> Vec<(u8, Vec<u8>)> {
     );
     let mut replies = split_packets(&out.stdout);
     assert_eq!(replies.remove(0).0, SSH_FXP_VERSION);
-    replies
+    (replies, String::from_utf8(out.stderr).unwrap())
 }
 
 fn run(args: &[&str]) -> Output {
@@ -194,4 +200,92 @@ fn explicit_umask() {
         fs::metadata(&p).unwrap().permissions().mode() & 0o777,
         0o600
     );
+}
+
+fn file_session(t: &TempDir) -> Vec<Vec<u8>> {
+    let p = t.path("f");
+    let mut write = Writer::new(SSH_FXP_WRITE);
+    write
+        .u32(2)
+        .string(&0u32.to_be_bytes())
+        .u64(0)
+        .string(b"data");
+    let mut close = Writer::new(SSH_FXP_CLOSE);
+    close.u32(3).string(&0u32.to_be_bytes());
+    vec![
+        open_req(1, &p, SSH_FXF_WRITE | SSH_FXF_CREAT, Some(0o644)),
+        write.finish(),
+        close.finish(),
+        path_req(SSH_FXP_REMOVE, 4, &p),
+    ]
+}
+
+#[test]
+fn info_logging_to_stderr() {
+    let t = TempDir::new();
+    let p = t.path("f");
+    let p = p.display();
+    let (_, log) = session_with_stderr(&["-e", "-l", "INFO"], file_session(&t));
+    let lines: Vec<&str> = log.lines().collect();
+    assert!(
+        lines[0].starts_with("session opened for local user "),
+        "{log}"
+    );
+    assert!(lines[0].ends_with(" from [192.0.2.7]"), "{log}");
+    assert_eq!(
+        lines[1],
+        format!("open \"{p}\" flags WRITE,CREATE mode 0644")
+    );
+    assert_eq!(lines[2], format!("close \"{p}\" bytes read 0 written 4"));
+    assert_eq!(lines[3], format!("remove name \"{p}\""));
+    assert!(lines[4].starts_with("session closed for local user "));
+    assert_eq!(lines.len(), 5);
+}
+
+#[test]
+fn default_level_is_quiet_on_stderr() {
+    let t = TempDir::new();
+    // Without -e the default goes to syslog, never stderr; with -e the
+    // default level (ERROR) has nothing to say about a clean session.
+    for args in [&[][..], &["-e"]] {
+        let (_, log) = session_with_stderr(args, file_session(&t));
+        assert_eq!(log, "", "{args:?}");
+    }
+}
+
+#[test]
+fn verbose_and_debug_levels() {
+    let t = TempDir::new();
+    fs::write(t.path("f"), b"").unwrap();
+    let (_, log) = session_with_stderr(
+        &["-e", "-R", "-l", "DEBUG"],
+        vec![path_req(SSH_FXP_REMOVE, 9, &t.path("f"))],
+    );
+    assert!(log.contains("request 9: remove\n"), "{log}");
+    assert!(log.contains("refusing remove request\n"), "{log}");
+}
+
+#[test]
+fn file_names_cannot_forge_log_lines() {
+    let t = TempDir::new();
+    let evil = t.path("x\nsession closed for local user root");
+    let (_, log) = session_with_stderr(
+        &["-e", "-l", "INFO"],
+        vec![path_req(SSH_FXP_REMOVE, 1, &evil)],
+    );
+    let remove = log.lines().find(|l| l.starts_with("remove")).unwrap();
+    assert!(remove.contains("x\\x0asession closed"), "{log}");
+    assert_eq!(
+        log.lines()
+            .filter(|l| l.starts_with("session closed"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn invalid_log_options() {
+    for args in [&["-l", "LOUD"][..], &["-f", "KERN"]] {
+        assert_eq!(run(args).status.code(), Some(2), "{args:?}");
+    }
 }
