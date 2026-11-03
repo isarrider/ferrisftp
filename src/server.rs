@@ -12,6 +12,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use crate::attrs::FileAttrs;
 use crate::handles::{Handle, HandleTable};
 use crate::longname::longname;
+use crate::policy::Policy;
 use crate::protocol::*;
 use crate::sys::NameCache;
 use crate::wire::{DecodeError, DecodeResult, Reader, Writer};
@@ -115,6 +116,7 @@ pub struct Server {
     pub(crate) handles: HandleTable,
     pub(crate) names: NameCache,
     read_buf: Vec<u8>,
+    policy: Policy,
 }
 
 impl Default for Server {
@@ -125,11 +127,17 @@ impl Default for Server {
 
 impl Server {
     pub fn new() -> Self {
+        Self::with_policy(Policy::default())
+    }
+
+    /// A server that refuses the requests `policy` does not permit.
+    pub fn with_policy(policy: Policy) -> Self {
         Server {
             initialized: false,
             handles: HandleTable::default(),
             names: NameCache::default(),
             read_buf: Vec::new(),
+            policy,
         }
     }
 
@@ -198,6 +206,19 @@ impl Server {
         // Every other request starts with a request id. Without one we
         // cannot even address an error reply.
         let id = r.u32().map_err(|_| Fatal("request without id"))?;
+        let extension = if kind == SSH_FXP_EXTENDED {
+            r.clone().string().ok()
+        } else {
+            None
+        };
+        if !self.policy.permits(kind, extension) {
+            out.extend_from_slice(&status_packet(
+                id,
+                SSH_FX_PERMISSION_DENIED,
+                status_text(SSH_FX_PERMISSION_DENIED),
+            ));
+            return Ok(());
+        }
         let reply = match self.dispatch(kind, id, &mut r) {
             Ok(Ok(packet)) => packet,
             Ok(Err(status)) => status_packet(id, status.code, &status.message),
@@ -328,6 +349,13 @@ impl Server {
     }
 
     fn open(&mut self, id: u32, path: &Path, pflags: u32, attrs: &FileAttrs) -> OpResult {
+        const MODIFYING: u32 = SSH_FXF_WRITE | SSH_FXF_APPEND | SSH_FXF_CREAT | SSH_FXF_TRUNC;
+        if self.policy.read_only && pflags & MODIFYING != 0 {
+            return Err(Status::new(
+                SSH_FX_PERMISSION_DENIED,
+                status_text(SSH_FX_PERMISSION_DENIED),
+            ));
+        }
         let read = pflags & SSH_FXF_READ != 0;
         let write = pflags & SSH_FXF_WRITE != 0;
         let mut flags = match (read, write) {

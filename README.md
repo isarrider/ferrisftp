@@ -26,7 +26,11 @@ Implemented:
   `fsync`, `lsetstat`, `limits`, `expand-path`, `copy-data`,
   `home-directory`, `users-groups-by-id`
 
-Not yet: threaded request handling, read-only and chroot modes.
+- Command-line options compatible with OpenSSH's sftp-server: read-only
+  mode, start directory, umask, request allow/deny lists
+
+Not yet: logging (`-e`, `-f`, `-l` are accepted but do nothing yet),
+prebuilt static binaries.
 
 ## Building
 
@@ -51,6 +55,32 @@ ln -sf /usr/local/bin/ferrisftp /usr/libexec/sftp-server
 ```
 Subsystem sftp /usr/local/bin/ferrisftp
 ```
+
+### Options
+
+The options match OpenSSH's sftp-server, so existing `Subsystem` lines
+keep working.
+
+| Option | Effect |
+|---|---|
+| `-R` | Read-only: refuse every request that modifies files |
+| `-d dir` | Start in `dir` instead of the home directory. `%d` is the home directory, `%u` the user name, and `~` / `~user` expand too |
+| `-u umask` | Explicit octal umask for new files and directories |
+| `-P list` | Refuse the listed requests (comma-separated) |
+| `-p list` | Allow only the listed requests |
+| `-Q requests` | Print the request names usable with `-p` / `-P` |
+| `-e`, `-f fac`, `-l level` | Logging options; accepted, not implemented yet |
+| `-h`, `-V` | Help, version |
+
+Example — a read-only server that starts in a shared directory:
+
+```
+Subsystem sftp /usr/local/bin/ferrisftp -R -d /srv/share
+```
+
+Refused requests get a "Permission denied" status.
+
+### Testing locally
 
 For local testing without any SSH server, the OpenSSH client can run it
 directly:

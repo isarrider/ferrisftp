@@ -3,36 +3,50 @@ use std::os::fd::FromRawFd;
 use std::process::ExitCode;
 
 use ferrisftp::Server;
-
-const USAGE: &str = "\
-usage: ferrisftp [-h] [-V]
-
-SFTP server meant to be run by an SSH server as its sftp subsystem.
-It speaks the SFTP protocol on stdin/stdout.
-
-  -h   show this help
-  -V   show version";
+use ferrisftp::cli::{self, Action, USAGE};
+use ferrisftp::policy::request_names;
 
 fn main() -> ExitCode {
-    // Phase 1 has no runtime options yet; any argument ends the program.
-    if let Some(arg) = std::env::args().nth(1) {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                return ExitCode::SUCCESS;
+    let opts = match cli::parse(std::env::args_os().skip(1)) {
+        Ok(Action::Run(opts)) => opts,
+        Ok(Action::Help) => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Ok(Action::Version) => {
+            println!("ferrisftp {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Ok(Action::ListRequests) => {
+            for name in request_names() {
+                println!("{name}");
             }
-            "-V" | "--version" => {
-                println!("ferrisftp {}", env!("CARGO_PKG_VERSION"));
-                return ExitCode::SUCCESS;
+            return ExitCode::SUCCESS;
+        }
+        Err(e) => {
+            eprintln!("ferrisftp: {e}\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+
+    if let Some(mask) = opts.umask {
+        // SAFETY: umask has no failure modes.
+        unsafe { libc::umask(mask as libc::mode_t) };
+    }
+    if let Some(template) = &opts.start_dir {
+        // Like OpenSSH's sftp-server, a start directory that cannot be
+        // entered is reported but does not end the session.
+        match cli::expand_start_dir(template) {
+            Ok(dir) => {
+                if let Err(e) = std::env::set_current_dir(&dir) {
+                    eprintln!("ferrisftp: cannot change to {}: {e}", dir.display());
+                }
             }
-            other => {
-                eprintln!("ferrisftp: unknown option '{other}'\n{USAGE}");
-                return ExitCode::from(2);
-            }
+            Err(e) => eprintln!("ferrisftp: start directory: {e}"),
         }
     }
 
-    let mut server = Server::new();
+    let mut server = Server::with_policy(opts.policy);
     // Use the raw descriptors: std's stdout is line-buffered and would
     // flush at every newline byte in file data. run() does its own
     // buffering.
