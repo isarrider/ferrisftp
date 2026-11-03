@@ -23,7 +23,7 @@ use crate::server::{
 use crate::sys;
 use crate::wire::{DecodeError, DecodeResult, Reader, Writer};
 
-/// (name, version) pairs sent in SSH_FXP_VERSION.
+/// Request extensions and their versions, as advertised in SSH_FXP_VERSION.
 pub const ADVERTISED: &[(&str, &str)] = &[
     ("posix-rename@openssh.com", "1"),
     ("statvfs@openssh.com", "2"),
@@ -37,6 +37,31 @@ pub const ADVERTISED: &[(&str, &str)] = &[
     ("home-directory", "1"),
     ("users-groups-by-id@openssh.com", "1"),
 ];
+
+/// Append every extension pair for the SSH_FXP_VERSION reply: the request
+/// extensions above plus informational ones.
+pub fn write_version_extensions(w: &mut Writer) {
+    for (name, version) in ADVERTISED {
+        w.string(name.as_bytes()).string(version.as_bytes());
+    }
+
+    // vendor-id (draft-ietf-secsh-filexfer-13, section 4.4): vendor name,
+    // product name, product version, build number.
+    let mut vendor = Writer::new(0);
+    vendor
+        .string(b"isarrider")
+        .string(b"ferrisftp")
+        .string(env!("CARGO_PKG_VERSION").as_bytes())
+        .u64(0);
+    let vendor = vendor.finish();
+    // Skip the 4-byte length and 1-byte type that Writer frames packets with.
+    w.string(b"vendor-id").string(&vendor[5..]);
+
+    // Tells clients which SSH_FXP_SYMLINK argument order we use, see
+    // https://www.greenend.org.uk/rjk/sftp/symlink-order@rjk.greenend.org.uk.html
+    w.string(b"symlink-order@rjk.greenend.org.uk")
+        .string(b"targetpath-linkpath");
+}
 
 /// Chunk size for server-side copies.
 const COPY_CHUNK: usize = 64 * 1024;

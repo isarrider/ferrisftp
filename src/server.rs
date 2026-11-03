@@ -194,9 +194,7 @@ impl Server {
             self.initialized = true;
             let mut w = Writer::new(SSH_FXP_VERSION);
             w.u32(client_version.min(SFTP_VERSION));
-            for (name, version) in crate::extensions::ADVERTISED {
-                w.string(name.as_bytes()).string(version.as_bytes());
-            }
+            crate::extensions::write_version_extensions(&mut w);
             out.extend_from_slice(&w.finish());
             return Ok(());
         }
