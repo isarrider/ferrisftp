@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - name: Interop with OpenSSH sftp client
+        run: |
+          cargo build --release
+          mkdir -p /tmp/interop/remote
+          head -c 3000000 /dev/urandom > /tmp/interop/src.bin
+          cat > /tmp/interop/batch <<EOF
+          cd /tmp/interop/remote
+          mkdir d
+          put /tmp/interop/src.bin d/f.bin
+          rename d/f.bin d/g.bin
+          ls -la d
+          get d/g.bin /tmp/interop/back.bin
+          rm d/g.bin
+          rmdir d
+          EOF
+          sftp -b /tmp/interop/batch -D "$PWD/target/release/ferrisftp"
+          cmp /tmp/interop/src.bin /tmp/interop/back.bin
