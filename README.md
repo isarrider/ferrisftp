@@ -31,6 +31,22 @@ Implemented:
 
 Not yet: prebuilt static binaries.
 
+## Footprint
+
+On an x86_64 test machine, compared with Green End and OpenSSH's own
+sftp-server:
+
+| | ferrisftp | Green End | OpenSSH |
+|---|---|---|---|
+| Lines of code (server only) | 1,873 Rust | — | — |
+| Binary | 381 KB | 84 KB | 88 KB |
+| Peak RSS, 1 GiB download | 3.3 MB | 2.4 MB | 3.4 MB |
+| Download / upload, no SSH | 1,396 / 1,715 MiB/s | 928 / 1,149 MiB/s | 1,454 / 1,708 MiB/s |
+
+The binary is larger because Rust's standard library is compiled in;
+memory per extra session is about 0.2 MB for all three. Details,
+methodology and the measuring script: [docs/footprint.md](docs/footprint.md).
+
 ## Building
 
 ```sh
