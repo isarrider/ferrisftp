@@ -5,10 +5,12 @@
 //! SFTP stream on stdin/stdout.
 
 pub mod attrs;
+pub mod extensions;
 pub mod handles;
 pub mod longname;
 pub mod protocol;
 pub mod server;
+pub mod sys;
 pub mod wire;
 
 pub use server::Server;

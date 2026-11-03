@@ -1,198 +1,16 @@
 //! Drives the server with real SFTP packets against a scratch directory.
 
+mod common;
+
 use std::fs;
 use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
-use ferrisftp::Server;
+use common::*;
 use ferrisftp::attrs::FileAttrs;
 use ferrisftp::protocol::*;
 use ferrisftp::wire::{Reader, Writer};
-
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Self {
-        static N: AtomicU32 = AtomicU32::new(0);
-        let p = std::env::temp_dir().join(format!(
-            "ferrisftp-test-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&p).unwrap();
-        TempDir(p)
-    }
-
-    fn path(&self, name: &str) -> PathBuf {
-        self.0.join(name)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-/// One decoded reply: packet type and body (request id included).
-struct Reply {
-    kind: u8,
-    body: Vec<u8>,
-}
-
-impl Reply {
-    fn reader(&self) -> Reader<'_> {
-        let mut r = Reader::new(&self.body);
-        r.u32().unwrap(); // request id
-        r
-    }
-
-    fn status(&self) -> u32 {
-        assert_eq!(self.kind, SSH_FXP_STATUS, "expected STATUS");
-        self.reader().u32().unwrap()
-    }
-
-    fn handle(&self) -> Vec<u8> {
-        assert_eq!(
-            self.kind,
-            SSH_FXP_HANDLE,
-            "expected HANDLE, got status {:?}",
-            self.try_status()
-        );
-        self.reader().string().unwrap().to_vec()
-    }
-
-    fn data(&self) -> Vec<u8> {
-        assert_eq!(self.kind, SSH_FXP_DATA, "expected DATA");
-        self.reader().string().unwrap().to_vec()
-    }
-
-    fn attrs(&self) -> FileAttrs {
-        assert_eq!(
-            self.kind,
-            SSH_FXP_ATTRS,
-            "expected ATTRS, got status {:?}",
-            self.try_status()
-        );
-        FileAttrs::decode(&mut self.reader()).unwrap()
-    }
-
-    fn names(&self) -> Vec<(Vec<u8>, Vec<u8>, FileAttrs)> {
-        assert_eq!(
-            self.kind,
-            SSH_FXP_NAME,
-            "expected NAME, got status {:?}",
-            self.try_status()
-        );
-        let mut r = self.reader();
-        let n = r.u32().unwrap();
-        (0..n)
-            .map(|_| {
-                let name = r.string().unwrap().to_vec();
-                let long = r.string().unwrap().to_vec();
-                (name, long, FileAttrs::decode(&mut r).unwrap())
-            })
-            .collect()
-    }
-
-    fn try_status(&self) -> Option<u32> {
-        (self.kind == SSH_FXP_STATUS).then(|| self.reader().u32().unwrap())
-    }
-}
-
-struct Client {
-    server: Server,
-    next_id: u32,
-}
-
-impl Client {
-    fn new() -> Self {
-        let mut c = Client {
-            server: Server::new(),
-            next_id: 1,
-        };
-        let mut w = Writer::new(SSH_FXP_INIT);
-        w.u32(3);
-        let reply = c.raw(&w.finish()).unwrap();
-        assert_eq!(reply.kind, SSH_FXP_VERSION);
-        c
-    }
-
-    /// Send one framed packet, return the single reply.
-    fn raw(&mut self, framed: &[u8]) -> Result<Reply, ferrisftp::server::Fatal> {
-        let mut out = Vec::new();
-        self.server.process(&framed[4..], &mut out)?;
-        let len = u32::from_be_bytes(out[..4].try_into().unwrap()) as usize;
-        assert_eq!(len + 4, out.len(), "exactly one reply");
-        Ok(Reply {
-            kind: out[4],
-            body: out[5..].to_vec(),
-        })
-    }
-
-    /// Build a request with a fresh id; `f` appends the body after the id.
-    fn req(&mut self, kind: u8, f: impl FnOnce(&mut Writer)) -> Reply {
-        let id = self.next_id;
-        self.next_id += 1;
-        let mut w = Writer::new(kind);
-        w.u32(id);
-        f(&mut w);
-        let reply = self.raw(&w.finish()).unwrap();
-        assert_eq!(
-            reply.body[..4],
-            id.to_be_bytes(),
-            "reply carries request id"
-        );
-        reply
-    }
-
-    fn open(&mut self, path: &Path, pflags: u32, attrs: FileAttrs) -> Reply {
-        self.req(SSH_FXP_OPEN, |w| {
-            w.string(path.as_os_str().as_encoded_bytes()).u32(pflags);
-            attrs.encode(w);
-        })
-    }
-
-    fn path_op(&mut self, kind: u8, path: &Path) -> Reply {
-        self.req(kind, |w| {
-            w.string(path.as_os_str().as_encoded_bytes());
-        })
-    }
-
-    fn handle_op(&mut self, kind: u8, handle: &[u8]) -> Reply {
-        self.req(kind, |w| {
-            w.string(handle);
-        })
-    }
-
-    fn write(&mut self, handle: &[u8], offset: u64, data: &[u8]) -> Reply {
-        self.req(SSH_FXP_WRITE, |w| {
-            w.string(handle).u64(offset).string(data);
-        })
-    }
-
-    fn read(&mut self, handle: &[u8], offset: u64, len: u32) -> Reply {
-        self.req(SSH_FXP_READ, |w| {
-            w.string(handle).u64(offset).u32(len);
-        })
-    }
-
-    fn two_paths(&mut self, kind: u8, a: &Path, b: &Path) -> Reply {
-        self.req(kind, |w| {
-            w.string(a.as_os_str().as_encoded_bytes())
-                .string(b.as_os_str().as_encoded_bytes());
-        })
-    }
-}
-
-fn perms(mode: u32) -> FileAttrs {
-    FileAttrs {
-        permissions: Some(mode),
-        ..Default::default()
-    }
-}
 
 #[test]
 fn version_negotiation() {
@@ -513,9 +331,9 @@ fn bad_requests() {
     assert_eq!(r.status(), SSH_FX_BAD_MESSAGE);
     // Unknown handle.
     assert_eq!(c.handle_op(SSH_FXP_CLOSE, b"nope").status(), SSH_FX_FAILURE);
-    // Extensions are not implemented yet.
+    // Unknown extension.
     let r = c.req(SSH_FXP_EXTENDED, |w| {
-        w.string(b"statvfs@openssh.com").string(b"/");
+        w.string(b"nonexistent@example.com").string(b"/");
     });
     assert_eq!(r.status(), SSH_FX_OP_UNSUPPORTED);
     // Unknown packet type.

@@ -18,10 +18,15 @@ over stdin/stdout. That keeps the code small and the attack surface narrow.
 
 Early development — not yet ready for production use.
 
-Implemented: all SFTP v3 requests (open/close/read/write, stat family,
-setstat, directories, remove, rename, realpath, readlink, symlink).
-Not yet: OpenSSH extensions (`posix-rename`, `statvfs`, `limits`, …),
-pipelined/threaded request handling, read-only and chroot modes.
+Implemented:
+
+- All SFTP v3 requests (open/close/read/write, stat family, setstat,
+  directories, remove, rename, realpath, readlink, symlink)
+- OpenSSH extensions: `posix-rename`, `statvfs`, `fstatvfs`, `hardlink`,
+  `fsync`, `lsetstat`, `limits`, `expand-path`, `copy-data`,
+  `home-directory`, `users-groups-by-id`
+
+Not yet: threaded request handling, read-only and chroot modes.
 
 ## Building
 
