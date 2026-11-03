@@ -3,8 +3,10 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub use ferrisftp::Server;
 use ferrisftp::attrs::FileAttrs;
@@ -200,4 +202,43 @@ pub fn perms(mode: u32) -> FileAttrs {
         permissions: Some(mode),
         ..Default::default()
     }
+}
+
+/// A `'static` output sink for `Server::run` whose contents the test can
+/// read afterwards.
+#[derive(Clone, Default)]
+pub struct SharedBuf(pub Arc<Mutex<Vec<u8>>>);
+
+impl SharedBuf {
+    pub fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut self.0.lock().unwrap())
+    }
+}
+
+impl Write for SharedBuf {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Split a byte stream of framed packets into (type, body) pairs.
+pub fn split_packets(stream: &[u8]) -> Vec<(u8, Vec<u8>)> {
+    let mut r = Reader::new(stream);
+    let mut out = Vec::new();
+    while r.remaining() > 0 {
+        let p = r.string().unwrap();
+        out.push((p[0], p[1..].to_vec()));
+    }
+    out
+}
+
+pub fn init_packet() -> Vec<u8> {
+    let mut w = Writer::new(SSH_FXP_INIT);
+    w.u32(3);
+    w.finish()
 }

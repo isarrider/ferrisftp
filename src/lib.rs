@@ -8,6 +8,7 @@ pub mod attrs;
 pub mod extensions;
 pub mod handles;
 pub mod longname;
+pub mod pipeline;
 pub mod protocol;
 pub mod server;
 pub mod sys;

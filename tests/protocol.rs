@@ -3,14 +3,13 @@
 mod common;
 
 use std::fs;
-use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use common::*;
 use ferrisftp::attrs::FileAttrs;
 use ferrisftp::protocol::*;
-use ferrisftp::wire::{Reader, Writer};
+use ferrisftp::wire::Writer;
 
 #[test]
 fn version_negotiation() {
@@ -347,41 +346,4 @@ fn bad_requests() {
             & 0o170000,
         0o040000
     );
-}
-
-#[test]
-fn run_over_streams() {
-    let mut input = Vec::new();
-    let mut w = Writer::new(SSH_FXP_INIT);
-    w.u32(3);
-    input.extend(w.finish());
-    for id in 1..=3 {
-        let mut w = Writer::new(SSH_FXP_STAT);
-        w.u32(id).string(b"/");
-        input.extend(w.finish());
-    }
-    let mut output = Vec::new();
-    Server::new().run(Cursor::new(input), &mut output).unwrap();
-
-    let mut r = Reader::new(&output);
-    let mut kinds = Vec::new();
-    while r.remaining() > 0 {
-        let body = r.string().unwrap();
-        kinds.push(body[0]);
-    }
-    assert_eq!(
-        kinds,
-        [SSH_FXP_VERSION, SSH_FXP_ATTRS, SSH_FXP_ATTRS, SSH_FXP_ATTRS]
-    );
-}
-
-#[test]
-fn oversized_packet_ends_session() {
-    let mut input = Vec::new();
-    let mut w = Writer::new(SSH_FXP_INIT);
-    w.u32(3);
-    input.extend(w.finish());
-    input.extend((MAX_PACKET_LEN + 1).to_be_bytes());
-    let mut output = Vec::new();
-    assert!(Server::new().run(Cursor::new(input), &mut output).is_err());
 }

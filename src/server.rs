@@ -2,7 +2,7 @@
 
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, DirBuilder, File, FileTimes};
-use std::io::{self, BufReader, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind};
 use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, FileExt, PermissionsExt};
@@ -131,42 +131,6 @@ impl Server {
             names: NameCache::default(),
             read_buf: Vec::new(),
         }
-    }
-
-    /// Serve one session until the client closes the stream.
-    pub fn run<R: Read, W: Write>(&mut self, input: R, output: W) -> io::Result<()> {
-        let mut input = BufReader::with_capacity(64 * 1024, input);
-        let mut output = io::BufWriter::with_capacity(64 * 1024, output);
-        let mut packet = Vec::new();
-        let mut reply = Vec::new();
-        loop {
-            let mut len = [0u8; 4];
-            match input.read_exact(&mut len) {
-                Ok(()) => {}
-                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e),
-            }
-            let len = u32::from_be_bytes(len);
-            if len == 0 || len > MAX_PACKET_LEN {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    Fatal("invalid packet length"),
-                ));
-            }
-            packet.resize(len as usize, 0);
-            input.read_exact(&mut packet)?;
-
-            reply.clear();
-            self.process(&packet, &mut reply)
-                .map_err(|f| io::Error::new(ErrorKind::InvalidData, f))?;
-            output.write_all(&reply)?;
-            // Let pipelined requests batch their replies into one write; flush
-            // once we would otherwise block waiting for more input.
-            if input.buffer().is_empty() {
-                output.flush()?;
-            }
-        }
-        output.flush()
     }
 
     /// Handle one packet (type byte plus body, without the length prefix)
