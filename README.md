@@ -16,7 +16,9 @@ over stdin/stdout. That keeps the code small and the attack surface narrow.
 
 ## Status
 
-Early development — not yet ready for production use.
+Ready for use. [v0.1.0](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0)
+implements everything listed below and has passed every test level,
+including real hardware.
 
 Implemented:
 
@@ -29,6 +31,26 @@ Implemented:
   mode, start directory, umask, request allow/deny lists
 - Logging to syslog or stderr, with OpenSSH's levels and log lines
 - Static binaries for armv6l, armv7l, aarch64, x86_64 and riscv64
+
+Tested:
+
+- **Unit and integration tests**: 63 tests covering every request, the
+  extensions, the command-line options and logging, plus two fuzz
+  targets.
+- **Every release binary on its oldest CPU**: CI runs the full test
+  suite and an OpenSSH client session for each architecture under QEMU,
+  emulating a Raspberry Pi 1 (ARM1176), Pi 2 (Cortex-A7), Pi 3
+  (Cortex-A53) and an RV64GC core.
+- **Behind Dropbear**: CI installs ferrisftp as Dropbear's `sftp`
+  subsystem and tests it over SSH as an unprivileged user with three
+  independent clients: OpenSSH `sftp`, rclone and Paramiko (see
+  [End-to-end with Dropbear](#end-to-end-with-dropbear)).
+- **Real hardware**: the v0.1.0 `aarch64` release binary as Dropbear
+  2025.89's SFTP server on a Radxa ROCK 5C (RK3588S), used from a desktop
+  SFTP client as root and as an unprivileged user: browsing, large
+  uploads and downloads verified with `sha256sum`, rename, permissions,
+  creating and deleting files and folders, and "Permission denied" for
+  system paths, with every operation showing up in the log.
 
 ## Footprint
 
