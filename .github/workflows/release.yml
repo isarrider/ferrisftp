@@ -104,6 +104,12 @@ jobs:
           cmp "$w/src.bin" "$w/back.bin"
           cmp "$w/src.bin" "$w/copy-back.bin"
 
+      - name: End-to-end behind Dropbear
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get install -y -qq dropbear-bin rclone python3-paramiko > /dev/null
+          sudo scripts/dropbear-e2e.sh "target/$TARGET/release/ferrisftp" --yes
+
       - name: Footprint, compared with Green End and OpenSSH
         if: matrix.arch == 'x86_64'
         run: |
