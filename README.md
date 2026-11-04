@@ -263,8 +263,11 @@ writing to an SD card.
 
 In **WinSCP**, open a remote file's *Properties* and calculate the
 checksum there with SHA-256, or use the `checksum` scripting command
-with `sha-256`. Paramiko's
-`SFTPFile.check()` works too.
+with `sha-256`.
+
+<img width="400" height="456" alt="image" src="https://github.com/user-attachments/assets/11b84a82-108e-4d24-8f8a-ac9734ffce9d" />
+
+Paramiko's `SFTPFile.check()` works too.
 
 Requests are handled one at a time per session, so while a large file
 is being hashed, that session's other requests wait. Other sessions are
