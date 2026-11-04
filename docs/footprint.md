@@ -56,6 +56,10 @@ Raspberry Pi this is a slightly larger download, nothing more.
 
 ## Memory
 
+RSS (resident set size) is the memory a process has in physical RAM,
+including pages shared with other processes, such as the system's C
+library. Peak RSS is the highest value during the session.
+
 | Peak RSS | ferrisftp | Green End | OpenSSH |
 |---|---|---|---|
 | Idle session | 2.5 MB | 2.1 MB | 1.9 MB |

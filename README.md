@@ -42,11 +42,23 @@ sftp-server:
 | Peak RSS, 1 GiB download | 3.3 MB | 2.4 MB | 3.4 MB |
 | Download / upload, no SSH | 1,396 / 1,715 MiB/s | 928 / 1,149 MiB/s | 1,454 / 1,708 MiB/s |
 
-The binary is larger because Rust's standard library is compiled in;
-memory per extra session is about 0.2 MB for all three. The static
-release binaries are 410–500 KB and use 0.3 MB idle, 1.3 MB while
-transferring. Details,
-methodology and the measuring script: [docs/footprint.md](docs/footprint.md).
+The binary is larger because Rust's standard library is compiled in.
+The static release binaries are 410–500 KB and use 0.3 MB idle, 1.3 MB
+while transferring.
+
+**About RSS:** RSS (resident set size) is the memory a process actually
+has in physical RAM, the RES column in `top`/`htop`. Memory a program
+merely reserves but never touches is not counted. RSS does include
+*shared* memory, though: a dynamically linked program counts the
+system's C library pages, of which only one copy exists in RAM for all
+programs using it. That is why the glibc build shows 2.4 MB idle and the
+static build 0.3 MB. What each additional SFTP session really costs is
+its private memory: about 0.2–0.3 MB for ferrisftp, Green End and
+OpenSSH alike, so even a 512 MB Raspberry Pi Zero could serve hundreds
+of sessions. "Peak RSS" is the highest RSS a session reached.
+
+Details, methodology and the measuring script:
+[docs/footprint.md](docs/footprint.md).
 
 ## Installing
 
