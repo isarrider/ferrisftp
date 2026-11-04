@@ -51,23 +51,19 @@ session() {
 
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
 
-# Memory one more session really costs: start two idle servers and read
-# the private memory of the second. Code pages are shared between the two
-# and shared libraries with the whole system, so neither is counted.
+# Memory one more session really costs: the anonymous memory of an idle
+# server (heap, stack, written data), from RssAnon in /proc/PID/status.
+# Code and shared libraries are file-backed and shared between sessions,
+# so they are not counted. /proc/PID/status stays readable even for
+# hardened servers that mark themselves non-dumpable.
 session_cost() {
-    local server=$1 first second private
+    local server=$1 pid cost
     sleep 3 | "$server" > /dev/null 2>&1 &
-    first=$!
-    sleep 3 | "$server" > /dev/null 2>&1 &
-    second=$!
+    pid=$!
     sleep 1
-    # Hardened servers (Green End, OpenSSH) mark themselves non-dumpable,
-    # which makes their /proc files readable by root only.
-    local smaps="/proc/$second/smaps_rollup" read=cat
-    [ -r "$smaps" ] || read="sudo -n cat"
-    private=$($read "$smaps" | awk '/^Private_(Clean|Dirty):/ {s += $2} END {print s}')
-    wait "$first" "$second" 2> /dev/null || true
-    echo "$private"
+    cost=$(awk '/^RssAnon:/ {print $2}' "/proc/$pid/status")
+    wait "$pid" 2> /dev/null || true
+    echo "$cost"
 }
 
 echo "machine: $(nproc) CPUs, $(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo | head -n1)"
@@ -81,7 +77,7 @@ for server in "$@"; do
     echo "pwd" > "$WORK/b"
     read -r _ idle < <(session "$server" "$WORK/b")
     echo "peak RSS, idle:     $idle KiB"
-    echo "per extra session:  $(session_cost "$server") KiB private"
+    echo "per extra session:  $(session_cost "$server") KiB (RssAnon)"
 
     echo "ls -l $LISTDIR" > "$WORK/b"
     read -r secs rss < <(session "$server" "$WORK/b")
