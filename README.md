@@ -84,8 +84,8 @@ What the numbers mean:
   Dropbear on a 2-core x86_64 VM, all three servers reached the same
   ~160 MiB/s down and ~110 MiB/s up; on a single-board computer it is
   tens of MB/s. The SFTP server makes no visible difference to transfer
-  speed. musl's simpler `memcpy` and `malloc` are why the static
-  binary's downloads are slower than the glibc build's.
+  speed. (Without SSH, the static binary's downloads are slower than the
+  glibc build's because of musl's simpler `memcpy` and `malloc`.)
 
 Methodology, code size details and the measuring script:
 [docs/footprint.md](docs/footprint.md).
