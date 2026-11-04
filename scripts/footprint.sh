@@ -61,7 +61,11 @@ session_cost() {
     sleep 3 | "$server" > /dev/null 2>&1 &
     second=$!
     sleep 1
-    private=$(awk '/^Private_(Clean|Dirty):/ {s += $2} END {print s}' "/proc/$second/smaps_rollup")
+    # Hardened servers (Green End, OpenSSH) mark themselves non-dumpable,
+    # which makes their /proc files readable by root only.
+    local smaps="/proc/$second/smaps_rollup" read=cat
+    [ -r "$smaps" ] || read="sudo -n cat"
+    private=$($read "$smaps" | awk '/^Private_(Clean|Dirty):/ {s += $2} END {print s}')
     wait "$first" "$second" 2> /dev/null || true
     echo "$private"
 }
