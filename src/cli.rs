@@ -22,7 +22,8 @@ usage: ferrisftp [-ehR] [-d start_directory] [-f log_facility] [-l log_level]
        ferrisftp -Q requests
        ferrisftp -V
 
-SFTP server meant to be run by an SSH server as its sftp subsystem.
+ferriSFTP: an SFTP server meant to be run by an SSH server as its sftp
+subsystem.
 It speaks the SFTP protocol on stdin/stdout.
 
   -d dir    start in dir instead of the home directory

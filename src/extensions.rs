@@ -50,7 +50,7 @@ pub fn write_version_extensions(w: &mut Writer) {
     let mut vendor = Writer::new(0);
     vendor
         .string(b"isarrider")
-        .string(b"ferrisftp")
+        .string(b"ferriSFTP")
         .string(env!("CARGO_PKG_VERSION").as_bytes())
         .u64(0);
     let vendor = vendor.finish();

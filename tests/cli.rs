@@ -86,7 +86,7 @@ fn help_version_and_requests() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("-R"));
 
     let out = run(&["-V"]);
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("ferrisftp "));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("ferriSFTP "));
 
     let out = run(&["-Q", "requests"]);
     let names = String::from_utf8(out.stdout).unwrap();

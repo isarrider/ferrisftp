@@ -85,7 +85,7 @@ fn vendor_id() {
     let data = version_extension("vendor-id");
     let mut r = Reader::new(&data);
     assert_eq!(r.string().unwrap(), b"isarrider");
-    assert_eq!(r.string().unwrap(), b"ferrisftp");
+    assert_eq!(r.string().unwrap(), b"ferriSFTP");
     assert_eq!(r.string().unwrap(), env!("CARGO_PKG_VERSION").as_bytes());
     r.u64().unwrap();
     assert_eq!(r.remaining(), 0);

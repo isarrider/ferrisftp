@@ -1,10 +1,13 @@
-# ferrisftp
+# ferriSFTP
 
 Lightweight SFTP server in Rust — a drop-in `sftp-server` subsystem for
 Dropbear and OpenSSH.
 
-ferrisftp does not handle networking, authentication or encryption. The SSH
-server authenticates the user, then runs ferrisftp as that user and talks to it
+The command, the binary and the release files are named in lowercase,
+`ferrisftp`.
+
+ferriSFTP does not handle networking, authentication or encryption. The SSH
+server authenticates the user, then runs ferriSFTP as that user and talks to it
 over stdin/stdout. That keeps the code small and the attack surface narrow.
 
 ## Goals
@@ -51,7 +54,7 @@ on the v0.1.0 code in the same CI run on x86_64 (AMD EPYC 7763,
 an SSH connection, so the server itself is measured; transfers use a
 1 GiB file, median of 5 runs.
 
-| | ferrisftp v0.1.0 release (static) | ferrisftp v0.1.0 from source (glibc) | Green End | OpenSSH |
+| | ferriSFTP v0.1.0 release (static) | ferriSFTP v0.1.0 from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
 | Binary | 496 KB | 380 KB | **<ins>84 KB</ins>** | 88 KB |
 | Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |
@@ -155,10 +158,10 @@ without publishing.
 
 ## Usage
 
-ferrisftp is started by the SSH server, not by hand.
+ferriSFTP is started by the SSH server, not by hand.
 
 **Dropbear** looks for the SFTP server at a fixed path (usually
-`/usr/libexec/sftp-server`); point that at ferrisftp:
+`/usr/libexec/sftp-server`); point that at ferriSFTP:
 
 ```sh
 ln -sf /usr/local/bin/ferrisftp /usr/libexec/sftp-server
@@ -225,7 +228,7 @@ sftp -D ./target/release/ferrisftp
 
 ### End-to-end with Dropbear
 
-[`scripts/dropbear-e2e.sh`](scripts/dropbear-e2e.sh) runs ferrisftp as
+[`scripts/dropbear-e2e.sh`](scripts/dropbear-e2e.sh) runs ferriSFTP as
 Dropbear's real `sftp` subsystem, logged in as an unprivileged user over
 an encrypted SSH connection, and tests it with three independent SFTP
 clients:
@@ -237,10 +240,10 @@ clients:
 - **Paramiko** (Python): random-access reads and writes, append,
   truncate, timestamps, both rename variants, error codes
 
-It also checks that the session process really is ferrisftp running as
+It also checks that the session process really is ferriSFTP running as
 the logged-in user. CI runs it against the static release binary on
 every pull request. The script changes the system (Dropbear's SFTP path
-is fixed at build time, so it is temporarily pointed at ferrisftp), so
+is fixed at build time, so it is temporarily pointed at ferriSFTP), so
 it is meant for CI and throwaway machines:
 
 ```sh

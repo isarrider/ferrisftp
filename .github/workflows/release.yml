@@ -188,7 +188,7 @@ jobs:
         # Creates the tag on this commit when it does not exist yet.
         run: |
           gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
-            --title "ferrisftp $TAG" --generate-notes
+            --title "ferriSFTP $TAG" --generate-notes
       - name: Rehearsal (pull requests only)
         if: env.PUBLISH != 'true'
         run: |

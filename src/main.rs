@@ -14,7 +14,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Ok(Action::Version) => {
-            println!("ferrisftp {}", env!("CARGO_PKG_VERSION"));
+            println!("ferriSFTP {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Ok(Action::ListRequests) => {

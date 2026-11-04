@@ -13,8 +13,8 @@ Server (Ubuntu's `gesftpserver` 2) and OpenSSH's `sftp-server` 9.6p1.
   there is no SSH connection and no encryption. That isolates the server
   itself; in real use the SSH server's encryption is the bottleneck long
   before any of these servers is (see [Throughput](#throughput)).
-- "ferrisftp release" is the static musl binary published in releases;
-  "ferrisftp from source" is a plain `cargo build --release` (glibc,
+- "ferriSFTP release" is the static musl binary published in releases;
+  "ferriSFTP from source" is a plain `cargo build --release` (glibc,
   dynamically linked).
 
 Every number can be reproduced with
@@ -30,7 +30,7 @@ scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib
 
 | | Lines of code |
 |---|---|
-| ferrisftp server (no comments, blanks or tests) | 1,873 |
+| ferriSFTP server (no comments, blanks or tests) | 1,873 |
 | Unit tests inside `src/` | 274 |
 | Integration tests (`tests/`) | 1,217 |
 | Fuzz targets (`fuzz/`) | 49 |
@@ -62,8 +62,8 @@ On x86_64, compared with the dynamically linked servers:
 
 | | Size | Links against |
 |---|---|---|
-| ferrisftp v0.1.0 release (static) | 496 KB | nothing |
-| ferrisftp v0.1.0 from source (glibc) | 380 KB | libc, libgcc_s |
+| ferriSFTP v0.1.0 release (static) | 496 KB | nothing |
+| ferriSFTP v0.1.0 from source (glibc) | 380 KB | libc, libgcc_s |
 | Green End | **<ins>84 KB</ins>** | libc |
 | OpenSSH sftp-server | 88 KB | libc |
 
@@ -86,7 +86,7 @@ Two different measures matter:
   copy in RAM serves every program. Peak RSS is the highest value during
   the session, measured with GNU `time`.
 
-| | ferrisftp v0.1.0 release (static) | ferrisftp v0.1.0 from source (glibc) | Green End | OpenSSH |
+| | ferriSFTP v0.1.0 release (static) | ferriSFTP v0.1.0 from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
 | Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |
 | Peak RSS, idle | **<ins>396 KiB</ins>** | 2,420 KiB | 2,244 KiB | 1,960 KiB |
@@ -109,15 +109,15 @@ time, packets are capped at 256 KiB, and there are no unbounded queues.
 
 | | Download | Upload |
 |---|---|---|
-| ferrisftp v0.1.0 release (static) | 1,106 MiB/s | **<ins>2,054 MiB/s</ins>** |
-| ferrisftp v0.1.0 from source (glibc) | **<ins>1,631 MiB/s</ins>** | 2,022 MiB/s |
+| ferriSFTP v0.1.0 release (static) | 1,106 MiB/s | **<ins>2,054 MiB/s</ins>** |
+| ferriSFTP v0.1.0 from source (glibc) | **<ins>1,631 MiB/s</ins>** | 2,022 MiB/s |
 | Green End | 826 MiB/s | 1,579 MiB/s |
 | OpenSSH | 1,600 MiB/s | 1,634 MiB/s |
 
 The best value in each column is in bold and underlined.
 
 `ls -l` of a 10,000-entry directory took 0.13 s with the static
-ferrisftp, 0.11 s built from source, 0.30 s with Green End and 0.13 s
+ferriSFTP, 0.11 s built from source, 0.30 s with Green End and 0.13 s
 with OpenSSH.
 
 The static binary's downloads are about a third slower than the glibc
@@ -130,7 +130,7 @@ chacha20-poly1305, 256 MiB file, median of 3:
 
 | Behind Dropbear 2022.83 | Download | Upload |
 |---|---|---|
-| ferrisftp (glibc) | 162 MiB/s | 110 MiB/s |
+| ferriSFTP (glibc) | 162 MiB/s | 110 MiB/s |
 | Green End | 158 MiB/s | **<ins>117 MiB/s</ins>** |
 | OpenSSH | **<ins>173 MiB/s</ins>** | 111 MiB/s |
 
