@@ -1,0 +1,135 @@
+name: Release builds
+
+# Static musl binaries for every architecture DietPi supports. Each one is
+# tested under QEMU emulating the oldest CPU it has to run on. Pushing a
+# tag vX.Y.Z publishes them as a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: armv6l
+            target: arm-unknown-linux-musleabihf
+            qemu_cpu: arm1176 # Raspberry Pi 1, Zero
+          - arch: armv7l
+            target: armv7-unknown-linux-musleabihf
+            qemu_cpu: cortex-a7 # Raspberry Pi 2
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+            qemu_cpu: cortex-a53 # Raspberry Pi 3
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - arch: riscv64
+            target: riscv64gc-unknown-linux-musl
+            qemu_cpu: rv64
+    env:
+      TARGET: ${{ matrix.target }}
+      # Read by qemu-user, including when started through binfmt_misc.
+      QEMU_CPU: ${{ matrix.qemu_cpu }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Set up QEMU
+        if: matrix.qemu_cpu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm,arm64,riscv64
+
+      - name: Build
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Check the binary
+        run: |
+          bin="target/$TARGET/release/ferrisftp"
+          file "$bin"
+          file "$bin" | grep -Eq 'static(-pie)? linked'
+          echo "size: $(stat -c %s "$bin") bytes"
+          "$bin" -V
+
+      - name: Test suite
+        run: cargo test --locked --target "$TARGET"
+
+      - name: Interop with OpenSSH sftp client
+        run: |
+          bin="$PWD/target/$TARGET/release/ferrisftp"
+          w=$(mktemp -d)
+          mkdir "$w/remote"
+          head -c 3000000 /dev/urandom > "$w/src.bin"
+          cat > "$w/batch" <<EOF
+          cd $w/remote
+          mkdir d
+          put $w/src.bin d/f.bin
+          rename d/f.bin d/g.bin
+          ls -la d
+          get d/g.bin $w/back.bin
+          df -h d
+          ln d/g.bin d/hard.bin
+          ln -s g.bin d/soft.bin
+          cp d/g.bin d/copy.bin
+          ls -l d
+          get d/copy.bin $w/copy-back.bin
+          rm d/*
+          rmdir d
+          EOF
+          sftp -b "$w/batch" -D "$bin -e -l INFO"
+          cmp "$w/src.bin" "$w/back.bin"
+          cmp "$w/src.bin" "$w/copy-back.bin"
+
+      - name: Package
+        run: |
+          mkdir dist
+          cp "target/$TARGET/release/ferrisftp" "dist/ferrisftp-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrisftp-${{ matrix.arch }}
+          path: dist/ferrisftp-${{ matrix.arch }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ferrisftp-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          chmod +x ferrisftp-*
+          sha256sum ferrisftp-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "ferrisftp $GITHUB_REF_NAME" --generate-notes

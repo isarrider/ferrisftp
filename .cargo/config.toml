@@ -1,0 +1,17 @@
+# Cross-compiling to the static musl targets needs no C toolchain: Rust
+# ships musl and its startup files for these targets, and rust-lld links.
+#
+#   rustup target add aarch64-unknown-linux-musl
+#   cargo build --release --target aarch64-unknown-linux-musl
+
+[target.arm-unknown-linux-musleabihf]
+linker = "rust-lld"
+
+[target.armv7-unknown-linux-musleabihf]
+linker = "rust-lld"
+
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+
+[target.riscv64gc-unknown-linux-musl]
+linker = "rust-lld"
