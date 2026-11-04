@@ -360,3 +360,117 @@ fn users_groups_by_id() {
     });
     assert_eq!(r.status(), SSH_FX_BAD_MESSAGE);
 }
+
+/// Split a check-file reply into (legacy "check-file" prefix present,
+/// algorithm, hash bytes).
+fn check_file_reply(r: &Reply, legacy: bool) -> (String, Vec<u8>) {
+    let mut rd = ext_reply(r);
+    if legacy {
+        assert_eq!(rd.string().unwrap(), b"check-file");
+    }
+    let alg = String::from_utf8(rd.string().unwrap().to_vec()).unwrap();
+    let mut rest = Vec::new();
+    while let Ok(b) = rd.u8() {
+        rest.push(b);
+    }
+    (alg, rest)
+}
+
+#[test]
+fn check_file_is_advertised_with_algorithms() {
+    assert_eq!(version_extension("check-file"), b"sha256");
+}
+
+#[test]
+fn check_file_name() {
+    use sha2::Digest;
+    let t = TempDir::new();
+    let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+    fs::write(t.path("f"), &data).unwrap();
+    std::os::unix::fs::symlink("f", t.path("link")).unwrap();
+    let mut c = Client::new();
+    let req = |c: &mut Client, path: &Path, algs: &str, start: u64, len: u64, block: u32| {
+        c.ext("check-file-name", |w| {
+            w.string(bytes(path))
+                .string(algs.as_bytes())
+                .u64(start)
+                .u64(len)
+                .u32(block);
+        })
+    };
+
+    // Whole file; the first supported algorithm in the list wins.
+    let r = req(&mut c, &t.path("f"), "blake3,sha256,md5", 0, 0, 0);
+    let (alg, hash) = check_file_reply(&r, false);
+    assert_eq!(alg, "sha256");
+    assert_eq!(hash, sha2::Sha256::digest(&data).to_vec());
+
+    // Symlinks are followed.
+    let r = req(&mut c, &t.path("link"), "sha256", 0, 0, 0);
+    let (alg, hash) = check_file_reply(&r, false);
+    assert_eq!(alg, "sha256");
+    assert_eq!(hash, sha2::Sha256::digest(&data).to_vec());
+
+    // A range, in blocks.
+    let r = req(&mut c, &t.path("f"), "sha256", 1000, 10_000, 4096);
+    let (_, hash) = check_file_reply(&r, false);
+    let want: Vec<u8> = data[1000..11_000]
+        .chunks(4096)
+        .flat_map(|b| sha2::Sha256::digest(b).to_vec())
+        .collect();
+    assert_eq!(hash, want);
+
+    // Weak or unknown algorithms are refused, even as the only choice.
+    for algs in ["md5", "sha1", "crc32", "md5,sha1,crc32", "sha512", "blake3"] {
+        let r = req(&mut c, &t.path("f"), algs, 0, 0, 0);
+        assert_eq!(r.status(), SSH_FX_OP_UNSUPPORTED, "{algs}");
+    }
+
+    // Errors.
+    let r = req(&mut c, &t.path("f"), "sha256", 0, 0, 100);
+    assert_eq!(r.status(), SSH_FX_FAILURE);
+    // 3 MB in 256-byte blocks is about 366 KiB of hashes, more than one
+    // 256 KiB reply can carry.
+    fs::write(t.path("big"), vec![0u8; 3_000_000]).unwrap();
+    let r = req(&mut c, &t.path("big"), "sha256", 0, 0, 256);
+    assert_eq!(r.status(), SSH_FX_FAILURE);
+    let r = req(&mut c, &t.path("missing"), "sha256", 0, 0, 0);
+    assert_eq!(r.status(), SSH_FX_NO_SUCH_FILE);
+    let r = req(&mut c, &t.0, "sha256", 0, 0, 0);
+    assert_eq!(r.status(), SSH_FX_FAILURE, "directory");
+    let r = req(&mut c, Path::new("/dev/zero"), "sha256", 0, 0, 0);
+    assert_eq!(r.status(), SSH_FX_FAILURE, "device");
+}
+
+#[test]
+fn check_file_handle_and_legacy_variant() {
+    use sha2::Digest;
+    let t = TempDir::new();
+    fs::write(t.path("f"), b"hello world").unwrap();
+    let mut c = Client::new();
+    let h = c
+        .open(&t.path("f"), SSH_FXF_READ, FileAttrs::default())
+        .handle();
+    let want = sha2::Sha256::digest(b"hello world").to_vec();
+
+    for (name, legacy) in [("check-file-handle", false), ("check-file", true)] {
+        let r = c.ext(name, |w| {
+            w.string(&h).string(b"sha256").u64(0).u64(0).u32(0);
+        });
+        let (alg, hash) = check_file_reply(&r, legacy);
+        assert_eq!((alg.as_str(), hash), ("sha256", want.clone()), "{name}");
+    }
+
+    // A handle opened only for writing cannot be hashed.
+    let wh = c
+        .open(&t.path("f"), SSH_FXF_WRITE, FileAttrs::default())
+        .handle();
+    let r = c.ext("check-file-handle", |w| {
+        w.string(&wh).string(b"sha256").u64(0).u64(0).u32(0);
+    });
+    assert_eq!(r.status(), SSH_FX_PERMISSION_DENIED);
+    let r = c.ext("check-file-handle", |w| {
+        w.string(b"bad!").string(b"sha256").u64(0).u64(0).u32(0);
+    });
+    assert_eq!(r.status(), SSH_FX_FAILURE);
+}

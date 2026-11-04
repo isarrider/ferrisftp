@@ -105,6 +105,12 @@ impl Writer {
         self
     }
 
+    /// Raw bytes without a length prefix.
+    pub fn bytes(&mut self, b: &[u8]) -> &mut Self {
+        self.buf.extend_from_slice(b);
+        self
+    }
+
     /// Current size of the packet including the length prefix.
     pub fn len(&self) -> usize {
         self.buf.len()

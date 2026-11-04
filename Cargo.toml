@@ -12,6 +12,7 @@ categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 libc = "0.2"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = "z"
