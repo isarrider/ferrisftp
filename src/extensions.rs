@@ -13,6 +13,7 @@ use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use crate::attrs::FileAttrs;
+use crate::checkfile::{self, Algorithm};
 use crate::handles::Handle;
 use crate::log::Quoted;
 use crate::protocol::*;
@@ -61,7 +62,29 @@ pub fn write_version_extensions(w: &mut Writer) {
     // https://www.greenend.org.uk/rjk/sftp/symlink-order@rjk.greenend.org.uk.html
     w.string(b"symlink-order@rjk.greenend.org.uk")
         .string(b"targetpath-linkpath");
+
+    // Server-side hashing. The draft defines no extension data for SFTP v3;
+    // we list the supported algorithms. WinSCP detects the extension by
+    // this name.
+    w.string(b"check-file")
+        .string(checkfile::ALGORITHMS.as_bytes());
 }
+
+/// Which wire format a check-file request uses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CheckFileVariant {
+    /// check-file-name / check-file-handle
+    /// (draft-ietf-secsh-filexfer-extensions-00): the reply is the
+    /// algorithm name followed by the hashes. WinSCP uses this.
+    Current,
+    /// check-file with a handle, from the older filexfer drafts: the reply
+    /// starts with the string "check-file". Paramiko uses this.
+    Legacy,
+}
+
+/// Bytes of a check-file reply other than the hashes: header, request
+/// id, "check-file" for the legacy variant and the algorithm name.
+const CHECK_FILE_OVERHEAD: usize = 64;
 
 /// Chunk size for server-side copies.
 const COPY_CHUNK: usize = 64 * 1024;
@@ -176,6 +199,44 @@ impl Server {
                 w.string(&users).string(&groups);
                 Ok(w.finish())
             }
+            b"check-file-name" => {
+                let path = r.string()?;
+                let algorithms = r.string()?;
+                let (start, length, block_size) = (r.u64()?, r.u64()?, r.u32()?);
+                // Follows symlinks, as the draft specifies.
+                match File::open(path_from(path)) {
+                    Ok(file) => check_file(
+                        id,
+                        &file,
+                        path,
+                        CheckFileVariant::Current,
+                        algorithms,
+                        (start, length, block_size),
+                    ),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            b"check-file-handle" | b"check-file" => {
+                let handle = r.string()?;
+                let algorithms = r.string()?;
+                let (start, length, block_size) = (r.u64()?, r.u64()?, r.u32()?);
+                let variant = if request == b"check-file" {
+                    CheckFileVariant::Legacy
+                } else {
+                    CheckFileVariant::Current
+                };
+                match self.handles.get_mut(handle) {
+                    Some(Handle::File { file, path, .. }) => check_file(
+                        id,
+                        file,
+                        path.as_os_str().as_bytes(),
+                        variant,
+                        algorithms,
+                        (start, length, block_size),
+                    ),
+                    _ => Err(Status::bad_handle()),
+                }
+            }
             _ => Err(unsupported()),
         })
     }
@@ -257,6 +318,51 @@ impl Server {
         }
         Ok(())
     }
+}
+
+/// Hash a file for check-file-name, check-file-handle or check-file.
+fn check_file(
+    id: u32,
+    file: &File,
+    path: &[u8],
+    variant: CheckFileVariant,
+    algorithms: &[u8],
+    (start, length, block_size): (u64, u64, u32),
+) -> OpResult {
+    let Some(algorithm) = Algorithm::select(algorithms) else {
+        return Err(Status::new(
+            SSH_FX_OP_UNSUPPORTED,
+            "No supported hash algorithm",
+        ));
+    };
+    crate::log_info!(
+        "check-file {} algorithm {} offset {start} length {length} block-size {block_size}",
+        Quoted(path),
+        algorithm.name()
+    );
+    let max_output = MAX_PACKET_LEN as usize - CHECK_FILE_OVERHEAD;
+    let hashes = checkfile::hash_file(file, algorithm, start, length, block_size, max_output)
+        .map_err(|e| match e {
+            checkfile::Error::BlockSizeTooSmall => {
+                Status::new(SSH_FX_FAILURE, "Block size must be 0 or at least 256")
+            }
+            checkfile::Error::TooManyBlocks => {
+                Status::new(SSH_FX_FAILURE, "Too many blocks for one reply")
+            }
+            checkfile::Error::NotRegularFile => Status::new(SSH_FX_FAILURE, "Not a regular file"),
+            // A handle opened without read access.
+            checkfile::Error::Io(e) if e.raw_os_error() == Some(libc::EBADF) => {
+                Status::new(SSH_FX_PERMISSION_DENIED, "Handle not open for reading")
+            }
+            checkfile::Error::Io(e) => e.into(),
+        })?;
+    let mut w = Writer::with_capacity(SSH_FXP_EXTENDED_REPLY, hashes.len() + 32);
+    w.u32(id);
+    if variant == CheckFileVariant::Legacy {
+        w.string(b"check-file");
+    }
+    w.string(algorithm.name().as_bytes()).bytes(&hashes);
+    Ok(w.finish())
 }
 
 fn expand_path(path: &[u8]) -> Result<PathBuf, Status> {

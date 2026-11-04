@@ -69,6 +69,10 @@ const REQUESTS: &[RequestKind] = &[
         "users-groups-by-id@openssh.com",
         false,
     ),
+    ext("check-file-name", "check-file-name", false),
+    ext("check-file-handle", "check-file-handle", false),
+    // The older draft's name for check-file-handle, used by Paramiko.
+    ext("check-file", "check-file", false),
 ];
 
 /// Names accepted by `-p` / `-P`, in protocol order (for `-Q requests`).
@@ -174,6 +178,9 @@ mod tests {
         assert!(!p.permits(SSH_FXP_REMOVE, None));
         assert!(!p.permits(SSH_FXP_EXTENDED, Some(b"posix-rename@openssh.com")));
         assert!(p.permits(SSH_FXP_EXTENDED, Some(b"statvfs@openssh.com")));
+        // Hashing only reads.
+        assert!(p.permits(SSH_FXP_EXTENDED, Some(b"check-file-name")));
+        assert!(p.permits(SSH_FXP_EXTENDED, Some(b"check-file")));
         // Unknown extensions fall through to OP_UNSUPPORTED.
         assert!(p.permits(SSH_FXP_EXTENDED, Some(b"bogus@example.com")));
     }

@@ -27,6 +27,9 @@ Implemented:
 - OpenSSH extensions: `posix-rename`, `statvfs`, `fstatvfs`, `hardlink`,
   `fsync`, `lsetstat`, `limits`, `expand-path`, `copy-data`,
   `home-directory`, `users-groups-by-id`
+- Server-side hashing (`check-file`): md5, sha1, sha224, sha256, sha384,
+  sha512 and crc32, used by WinSCP's checksum feature (not yet released,
+  see [Server-side hashing](#server-side-hashing))
 - Command-line options compatible with OpenSSH's sftp-server: read-only
   mode, start directory, umask, request allow/deny lists
 - Logging to syslog or stderr, with OpenSSH's levels and log lines
@@ -84,8 +87,10 @@ an SSH connection, so the server itself is measured; transfers use a
 
 The best value in each row is in bold and underlined.
 
-The server is 1,873 lines of Rust (without comments, blanks and tests),
-with `libc` as its only dependency.
+In v0.1.0 the server is 1,873 lines of Rust (without comments, blanks
+and tests), with `libc` as its only dependency. Server-side hashing, added
+after v0.1.0, brings in the RustCrypto hash crates and adds about 70 KB to
+the binary.
 
 What the numbers mean:
 
@@ -235,6 +240,37 @@ session closed for local user alex from [192.0.2.7]
 `VERBOSE` adds directory listings and refused requests, `DEBUG` every
 request. Control characters in file names are escaped (`\x0a`), so a
 crafted name cannot forge log lines.
+
+### Server-side hashing
+
+ferrisftp supports the `check-file` extension: a client asks for the hash
+of a file, or a range of it, and gets only the hash back; the file
+itself does not cross the network. Use it to check a file on the server
+against a local copy without downloading it again, for example after
+writing to an SD card.
+
+- Algorithms: `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`,
+  `crc32`. The client sends a list; the first supported one is used.
+- One hash for the whole range, or one per block (at least 256 bytes),
+  up to what fits in one 256 KiB reply.
+- Only regular files; directories and devices are refused.
+- Hashing only reads, so it also works in read-only mode (`-R`). The
+  request names for `-p` / `-P` are `check-file-name`,
+  `check-file-handle` and `check-file`.
+
+In **WinSCP**, open a remote file's *Properties* and calculate the
+checksum there, or use the `checksum` scripting command. Paramiko's
+`SFTPFile.check()` works too.
+
+Requests are handled one at a time per session, so while a large file
+is being hashed, that session's other requests wait. Other sessions are
+not affected.
+
+Two request formats are understood: `check-file-name` and
+`check-file-handle` from the current draft
+([draft-ietf-secsh-filexfer-extensions-00](https://datatracker.ietf.org/doc/html/draft-ietf-secsh-filexfer-extensions-00),
+used by WinSCP), and `check-file` with a handle from the older drafts
+(used by Paramiko), whose reply starts with the extension name.
 
 ### Testing locally
 
