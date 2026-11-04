@@ -51,6 +51,23 @@ session() {
 
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
 
+# Memory one more session really costs: start two idle servers and read
+# the private memory of the second. Code pages are shared between the two
+# and shared libraries with the whole system, so neither is counted.
+session_cost() {
+    local server=$1 first second private
+    sleep 3 | "$server" > /dev/null 2>&1 &
+    first=$!
+    sleep 3 | "$server" > /dev/null 2>&1 &
+    second=$!
+    sleep 1
+    private=$(awk '/^Private_(Clean|Dirty):/ {s += $2} END {print s}' "/proc/$second/smaps_rollup")
+    wait "$first" "$second" 2> /dev/null || true
+    echo "$private"
+}
+
+echo "machine: $(nproc) CPUs, $(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo | head -n1)"
+
 for server in "$@"; do
     server=$(readlink -f "$server")
     echo "== $server"
@@ -60,6 +77,7 @@ for server in "$@"; do
     echo "pwd" > "$WORK/b"
     read -r _ idle < <(session "$server" "$WORK/b")
     echo "peak RSS, idle:     $idle KiB"
+    echo "per extra session:  $(session_cost "$server") KiB private"
 
     echo "ls -l $LISTDIR" > "$WORK/b"
     read -r secs rss < <(session "$server" "$WORK/b")
