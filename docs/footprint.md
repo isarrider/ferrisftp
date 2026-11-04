@@ -1,27 +1,30 @@
 # Footprint
 
-Measured on ferrisftp 0.1.0 (commit `514aaa5`), alongside Green End SFTP
-Server (Ubuntu's `gesftpserver` 2) and OpenSSH's `sftp-server` 9.6p1 on
-the same machine in the same run.
-
-The numbers can be reproduced with [`scripts/footprint.sh`](../scripts/footprint.sh):
-
-```sh
-cargo build --release
-scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib/openssh/sftp-server
-```
+Size and resource use of ferrisftp 0.1.0, compared with Green End SFTP
+Server (Ubuntu's `gesftpserver` 2) and OpenSSH's `sftp-server` 9.6p1.
 
 ## Test setup
 
-- x86_64 VM with 2 vCPUs, Linux 6.18, fast virtual disk; files are in the
+- All four servers measured in the same CI run (the "Footprint" step of
+  the x86_64 job in `.github/workflows/release.yml`), on a GitHub Actions
+  runner: Ubuntu 24.04, x86_64, AMD EPYC 7763, 4 CPUs. Files are in the
   page cache.
 - The OpenSSH `sftp` client starts each server directly (`sftp -D`), so
   there is no SSH connection and no encryption. That isolates the server
   itself; in real use the SSH server's encryption is the bottleneck long
   before any of these servers is (see [Throughput](#throughput)).
-- ferrisftp is the default `cargo build --release` (glibc, dynamically
-  linked). The static release binaries are covered in
-  [Static release binaries](#static-release-binaries).
+- "ferrisftp release" is the static musl binary published in releases;
+  "ferrisftp from source" is a plain `cargo build --release` (glibc,
+  dynamically linked).
+
+Every number can be reproduced with
+[`scripts/footprint.sh`](../scripts/footprint.sh), which takes any number
+of server binaries:
+
+```sh
+cargo build --release
+scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib/openssh/sftp-server
+```
 
 ## Code size
 
@@ -44,36 +47,53 @@ Largest modules: `server.rs` (624 lines, all v3 requests),
 
 ## Binary size
 
+The release binaries are statically linked against musl:
+
+| Release binary | Size |
+|---|---|
+| `ferrisftp-armv6l` | 446 KB |
+| `ferrisftp-armv7l` | 408 KB |
+| `ferrisftp-aarch64` | 442 KB |
+| `ferrisftp-x86_64` | 496 KB |
+| `ferrisftp-riscv64` | 427 KB |
+
+On x86_64, compared with the dynamically linked servers:
+
 | | Size | Links against |
 |---|---|---|
-| ferrisftp | 381 KB | libc, libgcc_s |
+| ferrisftp release (static) | 496 KB | nothing |
+| ferrisftp from source (glibc) | 380 KB | libc, libgcc_s |
 | Green End | 84 KB | libc |
 | OpenSSH sftp-server | 88 KB | libc |
 
-The difference is mostly Rust's standard library, which is compiled into
-the binary while the C servers use the system's shared C library. On a
-Raspberry Pi this is a slightly larger download, nothing more.
+The static binary includes its C library (musl) and Rust's standard
+library. The C servers use the system's shared C library instead.
 
 ## Memory
 
-| Peak RSS | ferrisftp | Green End | OpenSSH |
-|---|---|---|---|
-| Idle session | 2.5 MB | 2.1 MB | 1.9 MB |
-| `ls -l` of 10,000 files | 2.7 MB | 2.3 MB | 2.2 MB |
-| Downloading 1 GiB | 3.3 MB | 2.4 MB | 3.4 MB |
-| Uploading 1 GiB | 2.8 MB | 4.3 MB | 3.0 MB |
+Two different measures matter:
 
-Most of that RSS is the shared C library, which every process on the
-system shares. What one idle session adds on its own:
+- **Memory per extra session** is what each additional SFTP client
+  really costs: the anonymous memory of an idle session (heap, stack,
+  written data), read from `RssAnon` in `/proc/PID/status`. Code and
+  shared libraries are not included, because all sessions share them.
+- **RSS** (resident set size) is all memory a process has in physical
+  RAM, the RES column in `top`/`htop`. It includes shared memory: a
+  dynamically linked server counts the system's C library, of which one
+  copy in RAM serves every program. Peak RSS is the highest value during
+  the session, measured with GNU `time`.
 
-| Per idle session | ferrisftp | Green End | OpenSSH |
-|---|---|---|---|
-| Private, written (heap, stack) | 184 KB | 136 KB | 156 KB |
-| Private, read-only (code) | 388 KB | 104 KB | 84 KB |
+| | ferrisftp release (static) | ferrisftp from source (glibc) | Green End | OpenSSH |
+|---|---|---|---|---|
+| **Memory per extra session** | **60 KiB** | 168 KiB | 124 KiB | 128 KiB |
+| Peak RSS, idle | 396 KiB | 2,420 KiB | 2,244 KiB | 1,960 KiB |
+| Peak RSS, `ls -l` of 10,000 files | 600 KiB | 2,448 KiB | 2,372 KiB | 1,960 KiB |
+| Peak RSS, 1 GiB download | 1,328 KiB | 3,120 KiB | 2,244 KiB | 2,744 KiB |
+| Peak RSS, 1 GiB upload | 856 KiB | 2,572 KiB | 4,456 KiB | 2,564 KiB |
 
-The code pages are shared again between concurrent sessions of the same
-binary, so each further session costs roughly 0.2 MB with all three
-servers.
+The static binary's RSS is far lower because it maps only the parts of
+musl it uses, rather than all of glibc. Its per-session cost is also the
+lowest: a hundred simultaneous sessions take about 6 MiB.
 
 Memory stays flat with transfer size: requests are handled one at a
 time, packets are capped at 256 KiB, and there are no unbounded queues.
@@ -84,51 +104,21 @@ time, packets are capped at 256 KiB, and there are no unbounded queues.
 
 | | Download | Upload |
 |---|---|---|
-| ferrisftp | 1,396 MiB/s | 1,715 MiB/s |
-| Green End | 928 MiB/s | 1,149 MiB/s |
-| OpenSSH | 1,454 MiB/s | 1,708 MiB/s |
+| ferrisftp release (static) | 1,106 MiB/s | 2,054 MiB/s |
+| ferrisftp from source (glibc) | 1,631 MiB/s | 2,022 MiB/s |
+| Green End | 826 MiB/s | 1,579 MiB/s |
+| OpenSSH | 1,600 MiB/s | 1,634 MiB/s |
 
-ferrisftp is on par with OpenSSH's server. These figures are far beyond
-what an SSH connection carries on a single-board computer: there the SSH
-server's encryption limits a session to roughly tens of MB/s, so the
-choice of SFTP server makes no visible difference to transfer speed.
+`ls -l` of a 10,000-entry directory took 0.13 s with the static
+ferrisftp, 0.11 s built from source, 0.30 s with Green End and 0.13 s
+with OpenSSH.
 
-`ls -l` of a 10,000-entry directory took 0.08 s with ferrisftp and
-OpenSSH, and 0.16 s with Green End.
+The static binary's downloads are about a third slower than the glibc
+build's, because musl's `memcpy` and `malloc` are simpler than glibc's.
 
-## Static release binaries
-
-The release binaries are statically linked against musl, so they carry
-their own C library instead of sharing the system's.
-
-| Binary | Size |
-|---|---|
-| `ferrisftp-armv6l` | 446 KB |
-| `ferrisftp-armv7l` | 408 KB |
-| `ferrisftp-aarch64` | 442 KB |
-| `ferrisftp-x86_64` | 496 KB |
-| `ferrisftp-riscv64` | 427 KB |
-
-Static x86_64 (musl) against the dynamically linked glibc build, both
-built and measured on the same GitHub Actions runner (a different
-machine from the tables above), 512 MiB file, median of 3:
-
-| | musl, static | glibc, dynamic |
-|---|---|---|
-| Peak RSS, idle | 0.3 MB | 2.4 MB |
-| Peak RSS, `ls -l` of 10,000 files | 0.5 MB | 2.6 MB |
-| Peak RSS, download / upload | 1.3 / 0.9 MB | 3.1 / 2.5 MB |
-| Download / upload | 1,088 / 1,985 MiB/s | 1,597 / 1,995 MiB/s |
-| `ls -l` of 10,000 files | 0.13 s | 0.11 s |
-
-The static binary's RSS is far lower because it maps only the parts of
-musl it uses, rather than all of glibc. Unlike glibc's shared pages,
-though, this memory is not shared with other programs; per session the
-real cost is similar.
-
-Downloads are about a third slower with musl, whose `memcpy` and
-`malloc` are simpler than glibc's. At over 1 GB/s this is still far
-beyond what an SSH connection on a single-board computer carries.
+None of this is visible in practice: over SSH on a single-board
+computer, the SSH server's encryption limits a session to roughly tens
+of MB/s, far below any of these figures.
 
 ## Why it is single-threaded
 

@@ -104,13 +104,16 @@ jobs:
           cmp "$w/src.bin" "$w/back.bin"
           cmp "$w/src.bin" "$w/copy-back.bin"
 
-      - name: Footprint, musl vs glibc
+      - name: Footprint, compared with Green End and OpenSSH
         if: matrix.arch == 'x86_64'
         run: |
-          sudo apt-get install -y -qq time bc > /dev/null
+          sudo apt-get install -y -qq time bc gesftpserver openssh-sftp-server > /dev/null
           cargo build --release --locked
-          SIZE_MIB=512 RUNS=3 FILES=10000 scripts/footprint.sh \
-            "target/$TARGET/release/ferrisftp" target/release/ferrisftp
+          SIZE_MIB=1024 RUNS=5 FILES=10000 scripts/footprint.sh \
+            "target/$TARGET/release/ferrisftp" \
+            target/release/ferrisftp \
+            "$(dpkg -L gesftpserver | grep -m1 '/gesftpserver$')" \
+            /usr/lib/openssh/sftp-server
 
       - name: Package
         run: |
