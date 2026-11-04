@@ -20,8 +20,8 @@ scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib
   itself; in real use the SSH server's encryption is the bottleneck long
   before any of these servers is (see [Throughput](#throughput)).
 - ferrisftp is the default `cargo build --release` (glibc, dynamically
-  linked). Static musl builds for the release binaries are measured
-  separately once those builds exist.
+  linked). The static release binaries are covered in
+  [Static release binaries](#static-release-binaries).
 
 ## Code size
 
@@ -95,6 +95,40 @@ choice of SFTP server makes no visible difference to transfer speed.
 
 `ls -l` of a 10,000-entry directory took 0.08 s with ferrisftp and
 OpenSSH, and 0.16 s with Green End.
+
+## Static release binaries
+
+The release binaries are statically linked against musl, so they carry
+their own C library instead of sharing the system's.
+
+| Binary | Size |
+|---|---|
+| `ferrisftp-armv6l` | 446 KB |
+| `ferrisftp-armv7l` | 408 KB |
+| `ferrisftp-aarch64` | 442 KB |
+| `ferrisftp-x86_64` | 496 KB |
+| `ferrisftp-riscv64` | 427 KB |
+
+Static x86_64 (musl) against the dynamically linked glibc build, both
+built and measured on the same GitHub Actions runner (a different
+machine from the tables above), 512 MiB file, median of 3:
+
+| | musl, static | glibc, dynamic |
+|---|---|---|
+| Peak RSS, idle | 0.3 MB | 2.4 MB |
+| Peak RSS, `ls -l` of 10,000 files | 0.5 MB | 2.6 MB |
+| Peak RSS, download / upload | 1.3 / 0.9 MB | 3.1 / 2.5 MB |
+| Download / upload | 1,088 / 1,985 MiB/s | 1,597 / 1,995 MiB/s |
+| `ls -l` of 10,000 files | 0.13 s | 0.11 s |
+
+The static binary's RSS is far lower because it maps only the parts of
+musl it uses, rather than all of glibc. Unlike glibc's shared pages,
+though, this memory is not shared with other programs; per session the
+real cost is similar.
+
+Downloads are about a third slower with musl, whose `memcpy` and
+`malloc` are simpler than glibc's. At over 1 GB/s this is still far
+beyond what an SSH connection on a single-board computer carries.
 
 ## Why it is single-threaded
 

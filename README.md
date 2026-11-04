@@ -28,8 +28,7 @@ Implemented:
 - Command-line options compatible with OpenSSH's sftp-server: read-only
   mode, start directory, umask, request allow/deny lists
 - Logging to syslog or stderr, with OpenSSH's levels and log lines
-
-Not yet: prebuilt static binaries.
+- Static binaries for armv6l, armv7l, aarch64, x86_64 and riscv64
 
 ## Footprint
 
@@ -44,14 +43,64 @@ sftp-server:
 | Download / upload, no SSH | 1,396 / 1,715 MiB/s | 928 / 1,149 MiB/s | 1,454 / 1,708 MiB/s |
 
 The binary is larger because Rust's standard library is compiled in;
-memory per extra session is about 0.2 MB for all three. Details,
+memory per extra session is about 0.2 MB for all three. The static
+release binaries are 410–500 KB and use 0.3 MB idle, 1.3 MB while
+transferring. Details,
 methodology and the measuring script: [docs/footprint.md](docs/footprint.md).
+
+## Installing
+
+Each [release](https://github.com/isarrider/ferrisftp/releases) has a
+static binary per architecture, named after `uname -m`. They have no
+dependencies, so they run on any Linux distribution:
+
+```sh
+arch=$(uname -m)   # armv6l, armv7l, aarch64, x86_64 or riscv64
+curl -fLO "https://github.com/isarrider/ferrisftp/releases/latest/download/ferrisftp-$arch"
+curl -fLO "https://github.com/isarrider/ferrisftp/releases/latest/download/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+install -m 755 "ferrisftp-$arch" /usr/local/bin/ferrisftp
+```
+
+| Binary | Runs on |
+|---|---|
+| `armv6l` | Raspberry Pi 1 and Zero, and every newer 32-bit ARM board |
+| `armv7l` | ARMv7 boards with a 32-bit kernel, e.g. Raspberry Pi 2 and 3 |
+| `aarch64` | 64-bit ARM kernels (Raspberry Pi 3 and newer), even with 32-bit userland |
+| `x86_64` | 64-bit PCs and VMs |
+| `riscv64` | 64-bit RISC-V boards (RV64GC) |
+
+Each binary is tested in CI under QEMU emulating the oldest CPU it
+supports, with the full test suite and an OpenSSH client session.
 
 ## Building
 
 ```sh
 cargo build --release
 ```
+
+Static binaries for other architectures need only the Rust target, since
+Rust ships musl and links with its own `rust-lld`:
+
+```sh
+rustup target add aarch64-unknown-linux-musl
+cargo build --release --target aarch64-unknown-linux-musl
+```
+
+The targets for the other release binaries are
+`arm-unknown-linux-musleabihf`, `armv7-unknown-linux-musleabihf`,
+`x86_64-unknown-linux-musl` and `riscv64gc-unknown-linux-musl`.
+
+### Releasing
+
+Set the version in `Cargo.toml`, merge, then push a matching tag:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+CI builds and tests all architectures and publishes them with
+`SHA256SUMS` as a GitHub release.
 
 ## Usage
 
@@ -61,7 +110,6 @@ ferrisftp is started by the SSH server, not by hand.
 `/usr/libexec/sftp-server`); point that at ferrisftp:
 
 ```sh
-install -m 755 target/release/ferrisftp /usr/local/bin/ferrisftp
 ln -sf /usr/local/bin/ferrisftp /usr/libexec/sftp-server
 ```
 
