@@ -51,14 +51,14 @@ server itself is measured; transfers use a 1 GiB file, median of 5 runs.
 
 | | ferrisftp release (static) | ferrisftp from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
-| Binary | 496 KB | 380 KB | **84 KB** | 88 KB |
-| Memory per extra session | **60 KiB** | 168 KiB | 124 KiB | 128 KiB |
-| Peak RSS, idle | **0.4 MiB** | 2.4 MiB | 2.2 MiB | 1.9 MiB |
-| Peak RSS, download / upload | **1.3 / 0.8 MiB** | 3.0 / 2.5 MiB | 2.2 / 4.4 MiB | 2.7 / 2.5 MiB |
-| Download / upload | 1,106 / **2,054 MiB/s** | **1,631** / 2,022 MiB/s | 826 / 1,579 MiB/s | 1,600 / 1,634 MiB/s |
-| `ls -l` of 10,000 files | 0.13 s | **0.11 s** | 0.30 s | 0.13 s |
+| Binary | 496 KB | 380 KB | **<ins>84 KB</ins>** | 88 KB |
+| Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |
+| Peak RSS, idle | **<ins>0.4 MiB</ins>** | 2.4 MiB | 2.2 MiB | 1.9 MiB |
+| Peak RSS, download / upload | **<ins>1.3 / 0.8 MiB</ins>** | 3.0 / 2.5 MiB | 2.2 / 4.4 MiB | 2.7 / 2.5 MiB |
+| Download / upload | 1,106 / **<ins>2,054 MiB/s</ins>** | **<ins>1,631</ins>** / 2,022 MiB/s | 826 / 1,579 MiB/s | 1,600 / 1,634 MiB/s |
+| `ls -l` of 10,000 files | 0.13 s | **<ins>0.11 s</ins>** | 0.30 s | 0.13 s |
 
-The best value in each row is in bold.
+The best value in each row is in bold and underlined.
 
 The server is 1,873 lines of Rust (without comments, blanks and tests),
 with `libc` as its only dependency.
