@@ -34,22 +34,24 @@ Implemented:
 
 **The release binaries** are static, so they need nothing else on the
 system. Each one is tested in CI under QEMU emulating the oldest CPU it
-supports:
+supports. Sizes are those of the files published in the
+[v0.1.0 release](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0):
 
-| Binary | Size | Tested on |
+| Binary | Size (v0.1.0) | Tested on |
 |---|---|---|
-| `ferrisftp-armv6l` | 446 KB | ARM1176 (Raspberry Pi 1, Zero) |
-| `ferrisftp-armv7l` | 408 KB | Cortex-A7 (Raspberry Pi 2) |
-| `ferrisftp-aarch64` | 442 KB | Cortex-A53 (Raspberry Pi 3) |
-| `ferrisftp-x86_64` | 496 KB | x86_64 |
-| `ferrisftp-riscv64` | 427 KB | RV64GC |
+| `ferrisftp-armv6l` | 446 KB (445,832 bytes) | ARM1176 (Raspberry Pi 1, Zero) |
+| `ferrisftp-armv7l` | 408 KB (407,884 bytes) | Cortex-A7 (Raspberry Pi 2) |
+| `ferrisftp-aarch64` | 442 KB (441,584 bytes) | Cortex-A53 (Raspberry Pi 3) |
+| `ferrisftp-x86_64` | 496 KB (496,360 bytes) | x86_64 |
+| `ferrisftp-riscv64` | 427 KB (426,704 bytes) | RV64GC |
 
 **Compared with Green End and OpenSSH's sftp-server**, all four measured
-in the same CI run on x86_64 (AMD EPYC 7763, 4 CPUs). The OpenSSH `sftp`
-client starts each server directly, without an SSH connection, so the
-server itself is measured; transfers use a 1 GiB file, median of 5 runs.
+on the v0.1.0 code in the same CI run on x86_64 (AMD EPYC 7763,
+4 CPUs). The OpenSSH `sftp` client starts each server directly, without
+an SSH connection, so the server itself is measured; transfers use a
+1 GiB file, median of 5 runs.
 
-| | ferrisftp release (static) | ferrisftp from source (glibc) | Green End | OpenSSH |
+| | ferrisftp v0.1.0 release (static) | ferrisftp v0.1.0 from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
 | Binary | 496 KB | 380 KB | **<ins>84 KB</ins>** | 88 KB |
 | Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |

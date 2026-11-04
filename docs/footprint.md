@@ -1,6 +1,6 @@
 # Footprint
 
-Size and resource use of ferrisftp 0.1.0, compared with Green End SFTP
+Size and resource use of ferrisftp [v0.1.0](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0), compared with Green End SFTP
 Server (Ubuntu's `gesftpserver` 2) and OpenSSH's `sftp-server` 9.6p1.
 
 ## Test setup
@@ -47,22 +47,23 @@ Largest modules: `server.rs` (624 lines, all v3 requests),
 
 ## Binary size
 
-The release binaries are statically linked against musl:
+The release binaries are statically linked against musl. Sizes of the
+files published in the [v0.1.0 release](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0):
 
 | Release binary | Size |
 |---|---|
-| `ferrisftp-armv6l` | 446 KB |
-| `ferrisftp-armv7l` | 408 KB |
-| `ferrisftp-aarch64` | 442 KB |
-| `ferrisftp-x86_64` | 496 KB |
-| `ferrisftp-riscv64` | 427 KB |
+| `ferrisftp-armv6l` | 446 KB (445,832 bytes) |
+| `ferrisftp-armv7l` | 408 KB (407,884 bytes) |
+| `ferrisftp-aarch64` | 442 KB (441,584 bytes) |
+| `ferrisftp-x86_64` | 496 KB (496,360 bytes) |
+| `ferrisftp-riscv64` | 427 KB (426,704 bytes) |
 
 On x86_64, compared with the dynamically linked servers:
 
 | | Size | Links against |
 |---|---|---|
-| ferrisftp release (static) | 496 KB | nothing |
-| ferrisftp from source (glibc) | 380 KB | libc, libgcc_s |
+| ferrisftp v0.1.0 release (static) | 496 KB | nothing |
+| ferrisftp v0.1.0 from source (glibc) | 380 KB | libc, libgcc_s |
 | Green End | **<ins>84 KB</ins>** | libc |
 | OpenSSH sftp-server | 88 KB | libc |
 
@@ -85,7 +86,7 @@ Two different measures matter:
   copy in RAM serves every program. Peak RSS is the highest value during
   the session, measured with GNU `time`.
 
-| | ferrisftp release (static) | ferrisftp from source (glibc) | Green End | OpenSSH |
+| | ferrisftp v0.1.0 release (static) | ferrisftp v0.1.0 from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
 | Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |
 | Peak RSS, idle | **<ins>396 KiB</ins>** | 2,420 KiB | 2,244 KiB | 1,960 KiB |
@@ -108,8 +109,8 @@ time, packets are capped at 256 KiB, and there are no unbounded queues.
 
 | | Download | Upload |
 |---|---|---|
-| ferrisftp release (static) | 1,106 MiB/s | **<ins>2,054 MiB/s</ins>** |
-| ferrisftp from source (glibc) | **<ins>1,631 MiB/s</ins>** | 2,022 MiB/s |
+| ferrisftp v0.1.0 release (static) | 1,106 MiB/s | **<ins>2,054 MiB/s</ins>** |
+| ferrisftp v0.1.0 from source (glibc) | **<ins>1,631 MiB/s</ins>** | 2,022 MiB/s |
 | Green End | 826 MiB/s | 1,579 MiB/s |
 | OpenSSH | 1,600 MiB/s | 1,634 MiB/s |
 
