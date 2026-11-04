@@ -122,9 +122,19 @@ with OpenSSH.
 The static binary's downloads are about a third slower than the glibc
 build's, because musl's `memcpy` and `malloc` are simpler than glibc's.
 
-None of this is visible in practice: over SSH on a single-board
-computer, the SSH server's encryption limits a session to roughly tens
-of MB/s, far below any of these figures.
+None of this is visible in practice, because the SSH server's
+encryption is the limit. Each server installed as Dropbear's `sftp`
+subsystem, on a 2-core x86_64 VM (Intel Xeon, 2.1 GHz), cipher
+chacha20-poly1305, 256 MiB file, median of 3:
+
+| Behind Dropbear 2022.83 | Download | Upload |
+|---|---|---|
+| ferrisftp (glibc) | 162 MiB/s | 110 MiB/s |
+| Green End | 158 MiB/s | **<ins>117 MiB/s</ins>** |
+| OpenSSH | **<ins>173 MiB/s</ins>** | 111 MiB/s |
+
+The differences are within measurement noise. On a single-board
+computer the encryption limit is lower still, roughly tens of MB/s.
 
 ## Why it is single-threaded
 

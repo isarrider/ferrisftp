@@ -80,11 +80,12 @@ What the numbers mean:
 - **Binary size**: the static binary includes its C library (musl) and
   Rust's standard library; the C servers use the system's shared C
   library instead.
-- **Speed**: over SSH on a single-board computer, the SSH server's
-  encryption limits a transfer to tens of MB/s, far below any of these
-  figures, so the SFTP server makes no visible difference to transfer
-  speed. musl's simpler `memcpy` and `malloc` are why the static
-  binary's downloads are slower than the glibc build's.
+- **Speed**: behind Dropbear, encryption is the limit. Measured through
+  Dropbear on a 2-core x86_64 VM, all three servers reached the same
+  ~160 MiB/s down and ~110 MiB/s up; on a single-board computer it is
+  tens of MB/s. The SFTP server makes no visible difference to transfer
+  speed. (Without SSH, the static binary's downloads are slower than the
+  glibc build's because of musl's simpler `memcpy` and `malloc`.)
 
 Methodology, code size details and the measuring script:
 [docs/footprint.md](docs/footprint.md).
@@ -211,6 +212,30 @@ directly:
 
 ```sh
 sftp -D ./target/release/ferrisftp
+```
+
+### End-to-end with Dropbear
+
+[`scripts/dropbear-e2e.sh`](scripts/dropbear-e2e.sh) runs ferrisftp as
+Dropbear's real `sftp` subsystem, logged in as an unprivileged user over
+an encrypted SSH connection, and tests it with three independent SFTP
+clients:
+
+- **OpenSSH `sftp`**: transfers, rename, chmod, links, server-side copy,
+  `df`, and that `/root`, `/etc` and `/etc/shadow` are refused
+- **rclone** (Go): a tree of 100+ files including spaces and umlauts in
+  names, byte-for-byte compare, move, `about`, download, delete
+- **Paramiko** (Python): random-access reads and writes, append,
+  truncate, timestamps, both rename variants, error codes
+
+It also checks that the session process really is ferrisftp running as
+the logged-in user. CI runs it against the static release binary on
+every pull request. The script changes the system (Dropbear's SFTP path
+is fixed at build time, so it is temporarily pointed at ferrisftp), so
+it is meant for CI and throwaway machines:
+
+```sh
+sudo scripts/dropbear-e2e.sh target/release/ferrisftp --yes
 ```
 
 ## Fuzzing
