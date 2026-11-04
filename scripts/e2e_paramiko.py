@@ -53,18 +53,24 @@ def main() -> None:
     assert s.stat("f.bin").st_size == 5_000_004
     ok("append")
 
-    # Server-side hashing (the check-file extension).
+    # Server-side hashing (the check-file extension), SHA-256 only.
     with s.open("f.bin", "rb") as f:
         content = f.read()
         assert f.check("sha256") == hashlib.sha256(content).digest()
-        assert f.check("md5", 100, 4096) == hashlib.md5(content[100:4196]).digest()
-        blocks = f.check("sha1", 0, 0, 1_000_000)
+        assert f.check("sha256", 100, 4096) == hashlib.sha256(content[100:4196]).digest()
+        blocks = f.check("sha256", 0, 0, 1_000_000)
         want = b"".join(
-            hashlib.sha1(content[i : i + 1_000_000]).digest()
+            hashlib.sha256(content[i : i + 1_000_000]).digest()
             for i in range(0, len(content), 1_000_000)
         )
         assert blocks == want
-    ok("check-file: whole file, range and blocks")
+        for weak in ("md5", "sha1", "crc32"):
+            try:
+                f.check(weak)
+                raise SystemExit(f"weak algorithm {weak} was accepted")
+            except OSError:
+                pass
+    ok("check-file: sha256 whole file, range and blocks; md5/sha1/crc32 refused")
 
     s.truncate("f.bin", 1234)
     assert s.stat("f.bin").st_size == 1234

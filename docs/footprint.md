@@ -37,7 +37,7 @@ scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib
 
 63 tests in total, plus two fuzz targets. The only runtime dependency is
 the `libc` crate. (Server-side hashing, added after v0.1.0, adds the
-RustCrypto hash crates.)
+RustCrypto `sha2` crate.)
 
 For comparison, Green End's repository has about 8,000 lines of C,
 though that also includes its own SFTP client used for testing.

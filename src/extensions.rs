@@ -13,7 +13,7 @@ use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use crate::attrs::FileAttrs;
-use crate::checkfile::{self, Algorithm};
+use crate::checkfile;
 use crate::handles::Handle;
 use crate::log::Quoted;
 use crate::protocol::*;
@@ -64,10 +64,9 @@ pub fn write_version_extensions(w: &mut Writer) {
         .string(b"targetpath-linkpath");
 
     // Server-side hashing. The draft defines no extension data for SFTP v3;
-    // we list the supported algorithms. WinSCP detects the extension by
-    // this name.
-    w.string(b"check-file")
-        .string(checkfile::ALGORITHMS.as_bytes());
+    // we list the supported algorithms (only sha256). WinSCP detects the
+    // extension by this name.
+    w.string(b"check-file").string(checkfile::SHA256.as_bytes());
 }
 
 /// Which wire format a check-file request uses.
@@ -329,20 +328,19 @@ fn check_file(
     algorithms: &[u8],
     (start, length, block_size): (u64, u64, u32),
 ) -> OpResult {
-    let Some(algorithm) = Algorithm::select(algorithms) else {
+    if !checkfile::accepts_sha256(algorithms) {
         return Err(Status::new(
             SSH_FX_OP_UNSUPPORTED,
-            "No supported hash algorithm",
+            "Only sha256 is supported",
         ));
-    };
+    }
     crate::log_info!(
-        "check-file {} algorithm {} offset {start} length {length} block-size {block_size}",
-        Quoted(path),
-        algorithm.name()
+        "check-file {} algorithm sha256 offset {start} length {length} block-size {block_size}",
+        Quoted(path)
     );
     let max_output = MAX_PACKET_LEN as usize - CHECK_FILE_OVERHEAD;
-    let hashes = checkfile::hash_file(file, algorithm, start, length, block_size, max_output)
-        .map_err(|e| match e {
+    let hashes =
+        checkfile::hash_file(file, start, length, block_size, max_output).map_err(|e| match e {
             checkfile::Error::BlockSizeTooSmall => {
                 Status::new(SSH_FX_FAILURE, "Block size must be 0 or at least 256")
             }
@@ -361,7 +359,7 @@ fn check_file(
     if variant == CheckFileVariant::Legacy {
         w.string(b"check-file");
     }
-    w.string(algorithm.name().as_bytes()).bytes(&hashes);
+    w.string(checkfile::SHA256.as_bytes()).bytes(&hashes);
     Ok(w.finish())
 }
 

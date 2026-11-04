@@ -27,9 +27,9 @@ Implemented:
 - OpenSSH extensions: `posix-rename`, `statvfs`, `fstatvfs`, `hardlink`,
   `fsync`, `lsetstat`, `limits`, `expand-path`, `copy-data`,
   `home-directory`, `users-groups-by-id`
-- Server-side hashing (`check-file`): md5, sha1, sha224, sha256, sha384,
-  sha512 and crc32, used by WinSCP's checksum feature (not yet released,
-  see [Server-side hashing](#server-side-hashing))
+- Server-side hashing (`check-file`) with SHA-256, used by WinSCP's
+  checksum feature (not yet released, see
+  [Server-side hashing](#server-side-hashing))
 - Command-line options compatible with OpenSSH's sftp-server: read-only
   mode, start directory, umask, request allow/deny lists
 - Logging to syslog or stderr, with OpenSSH's levels and log lines
@@ -89,8 +89,8 @@ The best value in each row is in bold and underlined.
 
 In v0.1.0 the server is 1,873 lines of Rust (without comments, blanks
 and tests), with `libc` as its only dependency. Server-side hashing, added
-after v0.1.0, brings in the RustCrypto hash crates and adds about 70 KB to
-the binary.
+after v0.1.0, brings in the RustCrypto `sha2` crate and adds about 14 KB
+to the binary.
 
 What the numbers mean:
 
@@ -249,8 +249,11 @@ itself does not cross the network. Use it to check a file on the server
 against a local copy without downloading it again, for example after
 writing to an SD card.
 
-- Algorithms: `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`,
-  `crc32`. The client sends a list; the first supported one is used.
+- Only **SHA-256**. The draft also lists md5, sha1 and crc32; they are
+  deliberately not offered, because they cannot detect deliberate
+  tampering (collisions can be constructed). A client that asks only
+  for those gets "Only sha256 is supported", so it cannot fall back to
+  a weak algorithm.
 - One hash for the whole range, or one per block (at least 256 bytes),
   up to what fits in one 256 KiB reply.
 - Only regular files; directories and devices are refused.
@@ -259,7 +262,8 @@ writing to an SD card.
   `check-file-handle` and `check-file`.
 
 In **WinSCP**, open a remote file's *Properties* and calculate the
-checksum there, or use the `checksum` scripting command. Paramiko's
+checksum there with SHA-256, or use the `checksum` scripting command
+with `sha-256`. Paramiko's
 `SFTPFile.check()` works too.
 
 Requests are handled one at a time per session, so while a large file
