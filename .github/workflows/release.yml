@@ -28,6 +28,7 @@ jobs:
           - arch: armv7l
             target: armv7-unknown-linux-musleabihf
             qemu_cpu: cortex-a7 # Raspberry Pi 2
+            too_old_cpu: arm1176
           - arch: aarch64
             target: aarch64-unknown-linux-musl
             qemu_cpu: cortex-a53 # Raspberry Pi 3
@@ -62,6 +63,18 @@ jobs:
           echo "size: $(stat -c %s "$bin") bytes"
           "$bin" -V
 
+      - name: Check that QEMU enforces the CPU model
+        if: matrix.too_old_cpu
+        run: |
+          # This binary needs a newer CPU, so emulating an older one must
+          # make it fail. If it ran, QEMU_CPU would not take effect and the
+          # CPU-specific tests in this workflow would prove nothing.
+          if QEMU_CPU=${{ matrix.too_old_cpu }} "target/$TARGET/release/ferrisftp" -V; then
+            echo "QEMU_CPU=${{ matrix.too_old_cpu }} was not enforced"
+            exit 1
+          fi
+          echo "OK: refused to run on ${{ matrix.too_old_cpu }}, as expected"
+
       - name: Test suite
         run: cargo test --locked --target "$TARGET"
 
@@ -90,6 +103,14 @@ jobs:
           sftp -b "$w/batch" -D "$bin -e -l INFO"
           cmp "$w/src.bin" "$w/back.bin"
           cmp "$w/src.bin" "$w/copy-back.bin"
+
+      - name: Footprint, musl vs glibc
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get install -y -qq time bc > /dev/null
+          cargo build --release --locked
+          SIZE_MIB=512 RUNS=3 FILES=10000 scripts/footprint.sh \
+            "target/$TARGET/release/ferrisftp" target/release/ferrisftp
 
       - name: Package
         run: |
