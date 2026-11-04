@@ -135,14 +135,21 @@ The targets for the other release binaries are
 
 ### Releasing
 
-Set the version in `Cargo.toml`, merge, then push a matching tag:
+Set the version in `Cargo.toml` and merge. Then publish it, either:
 
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
+- **in the browser:** *Actions* → *Release builds* → *Run workflow*,
+  tick *Publish a release*, *Run workflow*. The workflow creates the tag
+  `vX.Y.Z` itself.
+- **from a terminal:** push a matching tag:
+
+  ```sh
+  git tag v0.1.0 && git push origin v0.1.0
+  ```
 
 CI builds and tests all architectures and publishes them with
-`SHA256SUMS` as a GitHub release.
+`SHA256SUMS` as a GitHub release. It refuses to publish a version that
+already has a release. Every pull request rehearses the release job
+without publishing.
 
 ## Usage
 
