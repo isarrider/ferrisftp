@@ -15,3 +15,5 @@ linker = "rust-lld"
 
 [target.riscv64gc-unknown-linux-musl]
 linker = "rust-lld"
+# Unlike the other musl targets, this one links dynamically by default.
+rustflags = ["-C", "target-feature=+crt-static"]

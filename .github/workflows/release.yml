@@ -58,7 +58,7 @@ jobs:
         run: |
           bin="target/$TARGET/release/ferrisftp"
           file "$bin"
-          file "$bin" | grep -Eq 'static(-pie)? linked'
+          file "$bin" | grep -Eq 'statically linked|static-pie linked'
           echo "size: $(stat -c %s "$bin") bytes"
           "$bin" -V
 
