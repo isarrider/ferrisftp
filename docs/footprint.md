@@ -30,7 +30,7 @@ scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib
 
 | | Lines of code |
 |---|---|
-| ferrisftp server (no comments, blanks or tests) | **1,873** |
+| ferrisftp server (no comments, blanks or tests) | 1,873 |
 | Unit tests inside `src/` | 274 |
 | Integration tests (`tests/`) | 1,217 |
 | Fuzz targets (`fuzz/`) | 49 |
@@ -63,8 +63,10 @@ On x86_64, compared with the dynamically linked servers:
 |---|---|---|
 | ferrisftp release (static) | 496 KB | nothing |
 | ferrisftp from source (glibc) | 380 KB | libc, libgcc_s |
-| Green End | 84 KB | libc |
+| Green End | **84 KB** | libc |
 | OpenSSH sftp-server | 88 KB | libc |
+
+The smallest is in bold.
 
 The static binary includes its C library (musl) and Rust's standard
 library. The C servers use the system's shared C library instead.
@@ -85,11 +87,13 @@ Two different measures matter:
 
 | | ferrisftp release (static) | ferrisftp from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
-| **Memory per extra session** | **60 KiB** | 168 KiB | 124 KiB | 128 KiB |
-| Peak RSS, idle | 396 KiB | 2,420 KiB | 2,244 KiB | 1,960 KiB |
-| Peak RSS, `ls -l` of 10,000 files | 600 KiB | 2,448 KiB | 2,372 KiB | 1,960 KiB |
-| Peak RSS, 1 GiB download | 1,328 KiB | 3,120 KiB | 2,244 KiB | 2,744 KiB |
-| Peak RSS, 1 GiB upload | 856 KiB | 2,572 KiB | 4,456 KiB | 2,564 KiB |
+| Memory per extra session | **60 KiB** | 168 KiB | 124 KiB | 128 KiB |
+| Peak RSS, idle | **396 KiB** | 2,420 KiB | 2,244 KiB | 1,960 KiB |
+| Peak RSS, `ls -l` of 10,000 files | **600 KiB** | 2,448 KiB | 2,372 KiB | 1,960 KiB |
+| Peak RSS, 1 GiB download | **1,328 KiB** | 3,120 KiB | 2,244 KiB | 2,744 KiB |
+| Peak RSS, 1 GiB upload | **856 KiB** | 2,572 KiB | 4,456 KiB | 2,564 KiB |
+
+The best value in each row is in bold.
 
 The static binary's RSS is far lower because it maps only the parts of
 musl it uses, rather than all of glibc. Its per-session cost is also the
@@ -104,10 +108,12 @@ time, packets are capped at 256 KiB, and there are no unbounded queues.
 
 | | Download | Upload |
 |---|---|---|
-| ferrisftp release (static) | 1,106 MiB/s | 2,054 MiB/s |
-| ferrisftp from source (glibc) | 1,631 MiB/s | 2,022 MiB/s |
+| ferrisftp release (static) | 1,106 MiB/s | **2,054 MiB/s** |
+| ferrisftp from source (glibc) | **1,631 MiB/s** | 2,022 MiB/s |
 | Green End | 826 MiB/s | 1,579 MiB/s |
 | OpenSSH | 1,600 MiB/s | 1,634 MiB/s |
+
+The best value in each column is in bold.
 
 `ls -l` of a 10,000-entry directory took 0.13 s with the static
 ferrisftp, 0.11 s built from source, 0.30 s with Green End and 0.13 s
