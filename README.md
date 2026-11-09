@@ -28,7 +28,7 @@ Implemented:
   `fsync`, `lsetstat`, `limits`, `expand-path`, `copy-data`,
   `home-directory`, `users-groups-by-id`
 - Server-side hashing (`check-file`) with SHA-256, used by WinSCP's
-  checksum feature (not yet released, see
+  checksum feature (since v0.2.0, see
   [Server-side hashing](#server-side-hashing))
 - Command-line options compatible with OpenSSH's sftp-server: read-only
   mode, start directory, umask, request allow/deny lists
@@ -53,7 +53,9 @@ Tested:
   SFTP client as root and as an unprivileged user: browsing, large
   uploads and downloads verified with `sha256sum`, rename, permissions,
   creating and deleting files and folders, and "Permission denied" for
-  system paths, with every operation showing up in the log.
+  system paths, with every operation showing up in the log. With the
+  0.2.0 build, WinSCP's SHA-256 checksum of files on the board was
+  checked the same way.
 
 ## Footprint
 
@@ -88,9 +90,9 @@ an SSH connection, so the server itself is measured; transfers use a
 The best value in each row is in bold and underlined.
 
 In v0.1.0 the server is 1,873 lines of Rust (without comments, blanks
-and tests), with `libc` as its only dependency. Server-side hashing, added
-after v0.1.0, brings in the RustCrypto `sha2` crate and adds about 14 KB
-to the binary.
+and tests), with `libc` as its only dependency. Server-side hashing, new
+in v0.2.0, brings in the RustCrypto `sha2` crate and adds about 14 KB to
+the binary.
 
 What the numbers mean:
 

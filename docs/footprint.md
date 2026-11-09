@@ -36,7 +36,7 @@ scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib
 | Fuzz targets (`fuzz/`) | 49 |
 
 63 tests in total, plus two fuzz targets. The only runtime dependency is
-the `libc` crate. (Server-side hashing, added after v0.1.0, adds the
+the `libc` crate. (Server-side hashing, new in v0.2.0, adds the
 RustCrypto `sha2` crate.)
 
 For comparison, Green End's repository has about 8,000 lines of C,
