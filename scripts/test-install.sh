@@ -35,6 +35,13 @@ ok() { echo "ok: $*"; }
 W=$(mktemp -d)
 chmod 755 "$W"
 cleanup() {
+    status=$?
+    if [ "$status" != 0 ]; then
+        echo "--- failed in step: ${STEP:-?}" >&2
+        for log in "$W"/*.log; do
+            [ -s "$log" ] && { echo "--- $log" >&2; cat "$log" >&2; }
+        done
+    fi
     if [ -f "$W/dropbear.pid" ]; then
         kill "$(cat "$W/dropbear.pid")" 2> /dev/null || true
     fi
@@ -60,16 +67,22 @@ sh "$INSTALL"
 ok "installed $("$BIN" -V), $SFTP_PATH -> $BIN"
 
 echo "== log in through Dropbear"
+STEP="create user"
 useradd -m -s /bin/sh "$USER_NAME"
 HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
+STEP="client key"
 ssh-keygen -q -t ed25519 -N '' -f "$W/key"
 install -d -m 700 -o "$USER_NAME" "$HOME_DIR/.ssh"
 install -m 600 -o "$USER_NAME" "$W/key.pub" "$HOME_DIR/.ssh/authorized_keys"
-dropbearkey -t ed25519 -f "$W/host_ed25519" > /dev/null 2>&1
-dropbearkey -t rsa -s 3072 -f "$W/host_rsa" > /dev/null 2>&1
+STEP="host keys"
+dropbearkey -t ed25519 -f "$W/host_ed25519" > "$W/keygen.log" 2>&1
+dropbearkey -t rsa -s 3072 -f "$W/host_rsa" >> "$W/keygen.log" 2>&1
+STEP="start dropbear"
 dropbear -F -E -s -p "127.0.0.1:$PORT" -r "$W/host_ed25519" -r "$W/host_rsa" \
     -P "$W/dropbear.pid" 2> "$W/dropbear.log" &
 for _ in $(seq 50); do [ -f "$W/dropbear.pid" ] && break; sleep 0.1; done
+[ -f "$W/dropbear.pid" ] || fail "Dropbear did not start"
+STEP="first session"
 
 cat > "$W/ssh_config" << EOF
 Host t
@@ -102,6 +115,7 @@ exe=$(readlink "/proc/$pid/exe")
 ok "Dropbear session runs $exe as $USER_NAME"
 sleep 2
 
+STEP="transfer"
 transfer || fail "transfer through Dropbear"
 ok "10 MB upload and download through Dropbear are identical"
 
