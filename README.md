@@ -16,7 +16,7 @@ over stdin/stdout. That keeps the code small and the attack surface narrow.
 
 ## Status
 
-Ready for use. [v0.1.0](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0)
+Ready for use. [v0.2.0](https://github.com/isarrider/ferrisftp/releases/tag/v0.2.0)
 implements everything listed below and has passed every test level,
 including real hardware.
 
@@ -37,7 +37,7 @@ Implemented:
 
 Tested:
 
-- **Unit and integration tests**: 63 tests covering every request, the
+- **Unit and integration tests**: 70 tests covering every request, the
   extensions, the command-line options and logging, plus two fuzz
   targets.
 - **Every release binary on its oldest CPU**: CI runs the full test
@@ -62,37 +62,36 @@ Tested:
 **The release binaries** are static, so they need nothing else on the
 system. Each one is tested in CI under QEMU emulating the oldest CPU it
 supports. Sizes are those of the files published in the
-[v0.1.0 release](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0):
+[v0.2.0 release](https://github.com/isarrider/ferrisftp/releases/tag/v0.2.0):
 
-| Binary | Size (v0.1.0) | Tested on |
+| Binary | Size (v0.2.0) | Tested on |
 |---|---|---|
-| `ferrisftp-armv6l` | 446 KB (445,832 bytes) | ARM1176 (Raspberry Pi 1, Zero) |
-| `ferrisftp-armv7l` | 408 KB (407,884 bytes) | Cortex-A7 (Raspberry Pi 2) |
-| `ferrisftp-aarch64` | 442 KB (441,584 bytes) | Cortex-A53 (Raspberry Pi 3) |
-| `ferrisftp-x86_64` | 496 KB (496,360 bytes) | x86_64 |
-| `ferrisftp-riscv64` | 427 KB (426,704 bytes) | RV64GC |
+| `ferrisftp-armv6l` | 454 KB (454,288 bytes) | ARM1176 (Raspberry Pi 1, Zero) |
+| `ferrisftp-armv7l` | 417 KB (416,516 bytes) | Cortex-A7 (Raspberry Pi 2) |
+| `ferrisftp-aarch64` | 449 KB (449,072 bytes) | Cortex-A53 (Raspberry Pi 3) |
+| `ferrisftp-x86_64` | 509 KB (508,648 bytes) | x86_64 |
+| `ferrisftp-riscv64` | 435 KB (434,632 bytes) | RV64GC |
 
 **Compared with Green End and OpenSSH's sftp-server**, all four measured
-on the v0.1.0 code in the same CI run on x86_64 (AMD EPYC 7763,
+on the v0.2.0 code in the same CI run on x86_64 (AMD EPYC 7763,
 4 CPUs). The OpenSSH `sftp` client starts each server directly, without
 an SSH connection, so the server itself is measured; transfers use a
 1 GiB file, median of 5 runs.
 
-| | ferrisftp v0.1.0 release (static) | ferrisftp v0.1.0 from source (glibc) | Green End | OpenSSH |
+| | ferrisftp v0.2.0 release (static) | ferrisftp v0.2.0 from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
-| Binary | 496 KB | 380 KB | **<ins>84 KB</ins>** | 88 KB |
-| Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |
-| Peak RSS, idle | **<ins>0.4 MiB</ins>** | 2.4 MiB | 2.2 MiB | 1.9 MiB |
-| Peak RSS, download / upload | **<ins>1.3 / 0.8 MiB</ins>** | 3.0 / 2.5 MiB | 2.2 / 4.4 MiB | 2.7 / 2.5 MiB |
-| Download / upload | 1,106 / **<ins>2,054 MiB/s</ins>** | **<ins>1,631</ins>** / 2,022 MiB/s | 826 / 1,579 MiB/s | 1,600 / 1,634 MiB/s |
-| `ls -l` of 10,000 files | 0.13 s | **<ins>0.11 s</ins>** | 0.30 s | 0.13 s |
+| Binary | 509 KB | 393 KB | **<ins>84 KB</ins>** | 88 KB |
+| Memory per extra session | **<ins>60 KiB</ins>** | 164 KiB | 124 KiB | 128 KiB |
+| Peak RSS, idle | **<ins>0.3 MiB</ins>** | 2.3 MiB | 2.1 MiB | 1.9 MiB |
+| Peak RSS, download / upload | **<ins>1.3 / 0.8 MiB</ins>** | 3.0 / 2.5 MiB | 2.4 / 4.2 MiB | 2.5 / 2.5 MiB |
+| Download / upload | 1,075 / **<ins>2,008 MiB/s</ins>** | **<ins>1,629</ins>** / 1,933 MiB/s | 821 / 1,534 MiB/s | 1,565 / 1,602 MiB/s |
+| `ls -l` of 10,000 files | 0.13 s | **<ins>0.11 s</ins>** | 0.31 s | 0.14 s |
 
 The best value in each row is in bold and underlined.
 
-In v0.1.0 the server is 1,873 lines of Rust (without comments, blanks
-and tests), with `libc` as its only dependency. Server-side hashing, new
-in v0.2.0, brings in the RustCrypto `sha2` crate and adds about 14 KB to
-the binary.
+The server is 2,047 lines of Rust (without comments, blanks and tests).
+Its dependencies are `libc` and RustCrypto's `sha2`, which server-side
+hashing brought in with v0.2.0, adding 7–12 KB to the release binaries.
 
 What the numbers mean:
 
@@ -106,7 +105,7 @@ What the numbers mean:
   dynamically linked server counts the system's C library, of which one
   copy in RAM serves every program. That is why the glibc builds show
   around 2 MiB idle while the static binary, which carries only the
-  parts of musl it uses, shows 0.4 MiB. Peak RSS is the highest value
+  parts of musl it uses, shows 0.3 MiB. Peak RSS is the highest value
   during the session.
 - **Binary size**: the static binary includes its C library (musl) and
   Rust's standard library; the C servers use the system's shared C

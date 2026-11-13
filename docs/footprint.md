@@ -1,6 +1,6 @@
 # Footprint
 
-Size and resource use of ferrisftp [v0.1.0](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0), compared with Green End SFTP
+Size and resource use of ferrisftp [v0.2.0](https://github.com/isarrider/ferrisftp/releases/tag/v0.2.0), compared with Green End SFTP
 Server (Ubuntu's `gesftpserver` 2) and OpenSSH's `sftp-server` 9.6p1.
 
 ## Test setup
@@ -30,41 +30,42 @@ scripts/footprint.sh target/release/ferrisftp /usr/libexec/gesftpserver /usr/lib
 
 | | Lines of code |
 |---|---|
-| ferrisftp server (no comments, blanks or tests) | 1,873 |
-| Unit tests inside `src/` | 274 |
-| Integration tests (`tests/`) | 1,217 |
+| ferrisftp server (no comments, blanks or tests) | 2,047 |
+| Unit tests inside `src/` | 359 |
+| Integration tests (`tests/`) | 1,310 |
 | Fuzz targets (`fuzz/`) | 49 |
 
-63 tests in total, plus two fuzz targets. The only runtime dependency is
-the `libc` crate. (Server-side hashing, new in v0.2.0, adds the
-RustCrypto `sha2` crate.)
+70 tests in total, plus two fuzz targets. Runtime dependencies are the
+`libc` crate and RustCrypto's `sha2` (for server-side hashing, new in
+v0.2.0; v0.1.0 had 1,873 lines and `libc` only).
 
 For comparison, Green End's repository has about 8,000 lines of C,
 though that also includes its own SFTP client used for testing.
 
 Largest modules: `server.rs` (624 lines, all v3 requests),
-`extensions.rs` (315, the OpenSSH extensions), `cli.rs` (152) and
-`log.rs` (130).
+`extensions.rs` (401, the OpenSSH extensions and `check-file`), `cli.rs`
+(152) and `log.rs` (130).
 
 ## Binary size
 
 The release binaries are statically linked against musl. Sizes of the
-files published in the [v0.1.0 release](https://github.com/isarrider/ferrisftp/releases/tag/v0.1.0):
+files published in the [v0.2.0 release](https://github.com/isarrider/ferrisftp/releases/tag/v0.2.0), and the change from
+v0.1.0 (server-side hashing):
 
-| Release binary | Size |
-|---|---|
-| `ferrisftp-armv6l` | 446 KB (445,832 bytes) |
-| `ferrisftp-armv7l` | 408 KB (407,884 bytes) |
-| `ferrisftp-aarch64` | 442 KB (441,584 bytes) |
-| `ferrisftp-x86_64` | 496 KB (496,360 bytes) |
-| `ferrisftp-riscv64` | 427 KB (426,704 bytes) |
+| Release binary | Size | vs. v0.1.0 |
+|---|---|---|
+| `ferrisftp-armv6l` | 454 KB (454,288 bytes) | +8 KB |
+| `ferrisftp-armv7l` | 417 KB (416,516 bytes) | +9 KB |
+| `ferrisftp-aarch64` | 449 KB (449,072 bytes) | +7 KB |
+| `ferrisftp-x86_64` | 509 KB (508,648 bytes) | +12 KB |
+| `ferrisftp-riscv64` | 435 KB (434,632 bytes) | +8 KB |
 
 On x86_64, compared with the dynamically linked servers:
 
 | | Size | Links against |
 |---|---|---|
-| ferrisftp v0.1.0 release (static) | 496 KB | nothing |
-| ferrisftp v0.1.0 from source (glibc) | 380 KB | libc, libgcc_s |
+| ferrisftp v0.2.0 release (static) | 509 KB | nothing |
+| ferrisftp v0.2.0 from source (glibc) | 393 KB | libc, libgcc_s |
 | Green End | **<ins>84 KB</ins>** | libc |
 | OpenSSH sftp-server | 88 KB | libc |
 
@@ -87,13 +88,13 @@ Two different measures matter:
   copy in RAM serves every program. Peak RSS is the highest value during
   the session, measured with GNU `time`.
 
-| | ferrisftp v0.1.0 release (static) | ferrisftp v0.1.0 from source (glibc) | Green End | OpenSSH |
+| | ferrisftp v0.2.0 release (static) | ferrisftp v0.2.0 from source (glibc) | Green End | OpenSSH |
 |---|---|---|---|---|
-| Memory per extra session | **<ins>60 KiB</ins>** | 168 KiB | 124 KiB | 128 KiB |
-| Peak RSS, idle | **<ins>396 KiB</ins>** | 2,420 KiB | 2,244 KiB | 1,960 KiB |
-| Peak RSS, `ls -l` of 10,000 files | **<ins>600 KiB</ins>** | 2,448 KiB | 2,372 KiB | 1,960 KiB |
-| Peak RSS, 1 GiB download | **<ins>1,328 KiB</ins>** | 3,120 KiB | 2,244 KiB | 2,744 KiB |
-| Peak RSS, 1 GiB upload | **<ins>856 KiB</ins>** | 2,572 KiB | 4,456 KiB | 2,564 KiB |
+| Memory per extra session | **<ins>60 KiB</ins>** | 164 KiB | 124 KiB | 128 KiB |
+| Peak RSS, idle | **<ins>276 KiB</ins>** | 2,396 KiB | 2,116 KiB | 1,960 KiB |
+| Peak RSS, `ls -l` of 10,000 files | **<ins>544 KiB</ins>** | 2,460 KiB | 2,244 KiB | 1,960 KiB |
+| Peak RSS, 1 GiB download | **<ins>1,352 KiB</ins>** | 3,076 KiB | 2,500 KiB | 2,556 KiB |
+| Peak RSS, 1 GiB upload | **<ins>864 KiB</ins>** | 2,588 KiB | 4,292 KiB | 2,564 KiB |
 
 The best value in each row is in bold and underlined.
 
@@ -110,15 +111,15 @@ time, packets are capped at 256 KiB, and there are no unbounded queues.
 
 | | Download | Upload |
 |---|---|---|
-| ferrisftp v0.1.0 release (static) | 1,106 MiB/s | **<ins>2,054 MiB/s</ins>** |
-| ferrisftp v0.1.0 from source (glibc) | **<ins>1,631 MiB/s</ins>** | 2,022 MiB/s |
-| Green End | 826 MiB/s | 1,579 MiB/s |
-| OpenSSH | 1,600 MiB/s | 1,634 MiB/s |
+| ferrisftp v0.2.0 release (static) | 1,075 MiB/s | **<ins>2,008 MiB/s</ins>** |
+| ferrisftp v0.2.0 from source (glibc) | **<ins>1,629 MiB/s</ins>** | 1,933 MiB/s |
+| Green End | 821 MiB/s | 1,534 MiB/s |
+| OpenSSH | 1,565 MiB/s | 1,602 MiB/s |
 
 The best value in each column is in bold and underlined.
 
 `ls -l` of a 10,000-entry directory took 0.13 s with the static
-ferrisftp, 0.11 s built from source, 0.30 s with Green End and 0.13 s
+ferrisftp, 0.11 s built from source, 0.31 s with Green End and 0.14 s
 with OpenSSH.
 
 The static binary's downloads are about a third slower than the glibc
@@ -131,7 +132,7 @@ chacha20-poly1305, 256 MiB file, median of 3:
 
 | Behind Dropbear 2022.83 | Download | Upload |
 |---|---|---|
-| ferrisftp (glibc) | 162 MiB/s | 110 MiB/s |
+| ferrisftp v0.1.0 (glibc) | 162 MiB/s | 110 MiB/s |
 | Green End | 158 MiB/s | **<ins>117 MiB/s</ins>** |
 | OpenSSH | **<ins>173 MiB/s</ins>** | 111 MiB/s |
 
