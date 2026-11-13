@@ -59,3 +59,23 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts
+
+  install-script:
+    # scripts/install.sh on clean Debian systems like DietPi's (Trixie ships
+    # Dropbear 2025.89), on x86_64 and on real arm64 runners.
+    name: install.sh on ${{ matrix.image }} (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        image: ['debian:trixie', 'debian:bookworm']
+    steps:
+      - name: Install Dropbear and an SSH client
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            dropbear-bin openssh-client curl ca-certificates procps > /dev/null
+      - uses: actions/checkout@v4
+      - run: scripts/test-install.sh
