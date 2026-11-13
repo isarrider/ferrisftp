@@ -123,6 +123,33 @@ Methodology, code size details and the measuring script:
 
 ## Installing
 
+### With Dropbear (DietPi, Debian, Raspberry Pi OS)
+
+As root, one command installs the latest release and makes Dropbear use
+it for SFTP:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/isarrider/ferrisftp/main/scripts/install.sh | sh
+```
+
+[`scripts/install.sh`](scripts/install.sh) picks the binary for this
+machine, verifies it against the release's `SHA256SUMS`, installs it as
+`/usr/local/bin/ferrisftp` and links Dropbear's SFTP path (usually
+`/usr/lib/sftp-server`) to it. No restart is needed. If a package owns
+that path (such as `openssh-sftp-server`), its file is moved aside with
+`dpkg-divert`, so package updates cannot overwrite the link. Running the
+script again updates ferrisftp.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/isarrider/ferrisftp/main/scripts/install.sh | sh -s -- --version v0.2.0  # a specific release
+curl -fsSL https://raw.githubusercontent.com/isarrider/ferrisftp/main/scripts/install.sh | sh -s -- --uninstall       # undo everything
+```
+
+With OpenSSH, the script installs the binary and prints the
+`Subsystem` line to put into `sshd_config`.
+
+### Manually
+
 Each [release](https://github.com/isarrider/ferrisftp/releases) has a
 static binary per architecture, named after `uname -m`. They have no
 dependencies, so they run on any Linux distribution:
