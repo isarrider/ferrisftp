@@ -48,6 +48,10 @@ cleanup() {
     pkill -KILL -u "$USER_NAME" 2> /dev/null || true
     sleep 0.5
     userdel -r "$USER_NAME" 2> /dev/null || true
+    # Never leave a half-tested installation behind.
+    if [ -n "${INSTALLED:-}" ]; then
+        sh "$INSTALL" --uninstall > /dev/null 2>&1 || true
+    fi
     rm -rf "$W"
 }
 trap cleanup EXIT
@@ -57,10 +61,12 @@ echo "== $(dropbear -V 2>&1 | head -n 1), sftp path $SFTP_PATH, $(uname -m)"
 [ -n "$SFTP_PATH" ] || fail "cannot find Dropbear's sftp path"
 
 # Remember what was there before, to check that --uninstall restores it.
+[ ! -e "$BIN" ] || fail "$BIN already exists; run install.sh --uninstall first"
 before=$(state "$SFTP_PATH")
 echo "before: $SFTP_PATH is $before"
 
 echo "== install"
+INSTALLED=1
 sh "$INSTALL"
 [ "$(readlink "$SFTP_PATH")" = "$BIN" ] || fail "$SFTP_PATH does not point to $BIN"
 "$BIN" -V | grep -q '^ferrisftp ' || fail "$BIN -V"
@@ -138,6 +144,7 @@ ok "second run keeps everything working"
 
 echo "== uninstall"
 sh "$INSTALL" --uninstall
+INSTALLED=
 [ ! -e "$BIN" ] || fail "$BIN still exists"
 if command -v dpkg-divert > /dev/null; then
     [ -z "$(dpkg-divert --list "$SFTP_PATH")" ] || fail "diversion left behind"
