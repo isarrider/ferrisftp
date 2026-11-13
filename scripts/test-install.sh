@@ -104,16 +104,27 @@ transfer() {
     cmp -s "$W/src.bin" "$W/back.bin"
 }
 
-# While a session is open, the process behind the sftp path must be the
-# installed ferrisftp, running as the user.
+# While a session is open, the server process must run as the user.
 ( (sleep 3; echo bye) | sftp -q -F "$W/ssh_config" t > /dev/null 2>&1 & )
 sleep 1.5
-pid=$(pgrep -u "$USER_NAME" -x "$(basename "$SFTP_PATH")" | head -n 1)
-[ -n "$pid" ] || fail "no sftp server process for $USER_NAME"
-exe=$(readlink "/proc/$pid/exe")
-[ "$exe" = "$BIN" ] || fail "session runs $exe, not $BIN"
-ok "Dropbear session runs $exe as $USER_NAME"
+pid=$(pgrep -u "$USER_NAME" -x "$(basename "$SFTP_PATH")" | head -n 1 || true)
+[ -n "$pid" ] || fail "no sftp server process running as $USER_NAME"
+# /proc/PID/exe needs ptrace rights, which containers usually lack.
+if exe=$(readlink "/proc/$pid/exe" 2> /dev/null); then
+    [ "$exe" = "$BIN" ] || fail "session runs $exe, not $BIN"
+    ok "Dropbear session runs $exe as $USER_NAME"
+else
+    ok "Dropbear session runs $SFTP_PATH as $USER_NAME"
+fi
 sleep 2
+
+# Independently of /proc: of the common SFTP servers only ferrisftp
+# advertises the check-file extension, and sftp -vvv lists them.
+STEP="identify server"
+sftp -vvv -b /dev/null -F "$W/ssh_config" t 2> "$W/sftp-debug.txt" > /dev/null || true
+grep -q 'extension "check-file"' "$W/sftp-debug.txt" ||
+    fail "the server did not advertise check-file, so it is not ferrisftp"
+ok "the server advertises check-file, so it is ferrisftp"
 
 STEP="transfer"
 transfer || fail "transfer through Dropbear"
